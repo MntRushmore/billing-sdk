@@ -7,12 +7,12 @@
   "author": "OpenCore Dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/opencoredev/billing-sdk.git"
+    "url": "git+https://github.com/MntRushmore/billing-sdk.git"
   },
   "bugs": {
-    "url": "https://github.com/opencoredev/billing-sdk/issues"
+    "url": "https://github.com/MntRushmore/billing-sdk/issues"
   },
-  "homepage": "https://github.com/opencoredev/billing-sdk#readme",
+  "homepage": "https://github.com/MntRushmore/billing-sdk#readme",
   "keywords": [
     "billing",
     "stripe",
