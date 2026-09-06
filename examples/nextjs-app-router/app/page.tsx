@@ -1,251 +1,299 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
-    <>
-      {/* Hero */}
-      <section className="hero">
-        <div className="container">
-          <h1>
-            Check entitlements.{" "}
-            <span className="hero-gradient">Cache automatically.</span>
-          </h1>
-          <p>
-            TypeScript SDK for subscription billing. One API for entitlements,
-            feature gating, and webhooks across Stripe, Polar, and more.
-          </p>
-          <div className="hero-buttons">
-            <a
-              href="https://github.com/MntRushmore/billing-sdk#readme"
-              className="btn btn-primary"
-            >
-              Get Started
-            </a>
-            <a
-              href="https://github.com/MntRushmore/billing-sdk"
-              className="btn btn-secondary"
-            >
-              View on GitHub
-            </a>
-          </div>
-          <div className="install">
-            <span className="install-prefix">$</span>
-            <span>npm install @fuime/billing-sdk</span>
-          </div>
-        </div>
-      </section>
+    <main className="billing-landing">
+      <Nav />
+      <Hero />
+      <CodeSection />
+      <Features />
+      <Providers />
+      <Footer />
+    </main>
+  );
+}
 
-      {/* Code Example */}
-      <section className="code-section">
-        <div className="container">
-          <div className="code-block">
-            <div className="code-header">
-              <span className="code-dot" />
-              <span className="code-dot" />
-              <span className="code-dot" />
-              <span style={{ marginLeft: "0.5rem" }}>lib/billing.ts</span>
+function Nav() {
+  return (
+    <nav className="landing-nav">
+      <Link className="landing-brand" href="/">
+        billing-sdk
+      </Link>
+      <div className="landing-nav-links">
+        <a href="https://github.com/MntRushmore/billing-sdk#readme">Docs</a>
+        <a href="https://github.com/MntRushmore/billing-sdk">GitHub</a>
+        <a
+          className="landing-nav-cta"
+          href="https://github.com/MntRushmore/billing-sdk#quickstart"
+        >
+          Get started
+        </a>
+      </div>
+      <a
+        className="landing-mobile-menu"
+        href="https://github.com/MntRushmore/billing-sdk#readme"
+      >
+        Docs
+      </a>
+    </nav>
+  );
+}
+
+function Hero() {
+  return (
+    <section className="landing-hero">
+      <div className="landing-hero-copy">
+        <h1>
+          Check entitlements.
+          <br />
+          Cache automatically.
+        </h1>
+        <p>
+          Open-source TypeScript SDK for subscription billing.
+          <span className="landing-hero-brand-line">
+            Stripe, Polar, and more. One typed SDK.
+          </span>
+        </p>
+        <div className="landing-hero-actions">
+          <a
+            className="landing-button landing-button-primary"
+            href="https://github.com/MntRushmore/billing-sdk#quickstart"
+          >
+            Start building ↗
+          </a>
+          <a
+            className="landing-button landing-button-secondary"
+            href="https://github.com/MntRushmore/billing-sdk"
+          >
+            View on GitHub
+          </a>
+        </div>
+      </div>
+      <div className="landing-install">
+        <div className="landing-install-box">
+          <span className="landing-install-prefix">$</span>
+          <span>npm install @fuime/billing-sdk</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CodeSection() {
+  return (
+    <section className="landing-code-section">
+      <div className="landing-container">
+        <h2>
+          Define your plans.
+          <br />
+          Check access anywhere.
+        </h2>
+        <div className="landing-code-flow">
+          <div className="landing-code-panel">
+            <div className="landing-code-header">
+              <span>lib/billing.ts</span>
+              <span className="landing-code-language">TypeScript</span>
             </div>
-            <div className="code-content">
-              <pre>
-                <code>
-                  <span className="code-keyword">import</span> {"{"}{" "}
-                  createEnhancedClient {"}"}{" "}
-                  <span className="code-keyword">from</span>{" "}
-                  <span className="code-string">"@fuime/billing-sdk"</span>;
-                  {"\n"}
-                  <span className="code-keyword">import</span> {"{"} stripe {"}"}{" "}
-                  <span className="code-keyword">from</span>{" "}
-                  <span className="code-string">
-                    "@fuime/billing-sdk/stripe"
+            <pre className="landing-code">
+              <code>
+                <span>
+                  <span className="kw">import</span> {"{"}{" "}
+                  <span className="fn">createEnhancedClient</span> {"}"}{" "}
+                  <span className="kw">from</span>{" "}
+                  <span className="str">&apos;@fuime/billing-sdk&apos;</span>
+                </span>
+                <span>
+                  <span className="kw">import</span> {"{"}{" "}
+                  <span className="fn">stripe</span> {"}"}{" "}
+                  <span className="kw">from</span>{" "}
+                  <span className="str">
+                    &apos;@fuime/billing-sdk/stripe&apos;
                   </span>
-                  ;{"\n\n"}
-                  <span className="code-keyword">const</span> billing ={" "}
-                  <span className="code-function">createEnhancedClient</span>
+                </span>
+                <span className="sp" />
+                <span>
+                  <span className="kw">const</span> billing ={" "}
+                  <span className="fn">createEnhancedClient</span>
                   ({"{"}
-                  {"\n"}
-                  {"  "}provider:{" "}
-                  <span className="code-function">stripe</span>({"{"} apiKey:{" "}
-                  <span className="code-string">
-                    process.env.STRIPE_SECRET_KEY
-                  </span>{" "}
-                  {"}"}),{"\n"}
-                  {"  "}
-                  <span className="code-comment">
-                    // Cache entitlements for 60s, auto-invalidate on webhooks
-                  </span>
-                  {"\n"}
-                  {"  "}cache: {"{"} ttlMs: 60_000 {"},"} {"\n"}
-                  {"  "}
-                  <span className="code-comment">
-                    // Define what each plan can access
-                  </span>
-                  {"\n"}
-                  {"  "}plans: {"{"}
-                  {"\n"}
+                </span>
+                <span>
+                  {"  "}provider: <span className="fn">stripe</span>({"{"}{" "}
+                  apiKey: process.env.STRIPE_KEY {"}"}),
+                </span>
+                <span>
+                  {"  "}cache: {"{"} ttlMs: 60_000 {"}"},
+                  <span className="cmt"> // Auto-invalidates on webhooks</span>
+                </span>
+                <span>{"  "}plans: {"{"}</span>
+                <span>
                   {"    "}
-                  <span className="code-string">"prod_pro"</span>: {"{"}{" "}
-                  features: [
-                  <span className="code-string">"api"</span>,{" "}
-                  <span className="code-string">"export"</span>] {"},"} {"\n"}
+                  <span className="str">&apos;prod_pro&apos;</span>: {"{"}{" "}
+                  features: [<span className="str">&apos;api&apos;</span>,{" "}
+                  <span className="str">&apos;export&apos;</span>] {"}"},
+                </span>
+                <span>
                   {"    "}
-                  <span className="code-string">"prod_enterprise"</span>: {"{"}{" "}
-                  features: <span className="code-string">"*"</span> {"}"},{" "}
-                  {"\n"}
+                  <span className="str">&apos;prod_enterprise&apos;</span>:{" "}
+                  {"{"} features: <span className="str">&apos;*&apos;</span>{" "}
+                  {"}"},
+                </span>
+                <span>{"  }"}</span>
+                <span>{"})"}</span>
+              </code>
+            </pre>
+          </div>
+          <div className="landing-code-panel">
+            <div className="landing-code-header">
+              <span>app/api/route.ts</span>
+              <span className="landing-code-language">TypeScript</span>
+            </div>
+            <pre className="landing-code">
+              <code>
+                <span className="cmt">
+                  // Check feature access (uses cache)
+                </span>
+                <span>
+                  <span className="kw">if</span> (
+                  <span className="kw">await</span> billing.
+                  <span className="fn">hasFeature</span>(userId,{" "}
+                  <span className="str">&apos;api&apos;</span>)) {"{"}
+                </span>
+                <span>
                   {"  "}
-                  {"}"},{"\n"}
-                  {"}"});
-                </code>
-              </pre>
-            </div>
+                  <span className="cmt">// User has access</span>
+                </span>
+                <span>{"}"}</span>
+                <span className="sp" />
+                <span className="cmt">// Get entitlement details</span>
+                <span>
+                  <span className="kw">const</span> ent ={" "}
+                  <span className="kw">await</span> billing.
+                  <span className="fn">getEntitlement</span>(userId)
+                </span>
+                <span className="cmt">
+                  // {"{"} active: true, productId: &apos;prod_pro&apos;,
+                  periodEnd: Date {"}"}
+                </span>
+              </code>
+            </pre>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
+  );
+}
 
-      {/* Usage Example */}
-      <section className="code-section" style={{ paddingTop: 0 }}>
-        <div className="container">
-          <div className="code-block">
-            <div className="code-header">
-              <span className="code-dot" />
-              <span className="code-dot" />
-              <span className="code-dot" />
-              <span style={{ marginLeft: "0.5rem" }}>app/api/route.ts</span>
-            </div>
-            <div className="code-content">
-              <pre>
-                <code>
-                  <span className="code-comment">
-                    // Check if user can access a feature
-                  </span>
-                  {"\n"}
-                  <span className="code-keyword">if</span> (
-                  <span className="code-keyword">await</span> billing.
-                  <span className="code-function">hasFeature</span>(userId,{" "}
-                  <span className="code-string">"api"</span>)) {"{"}
-                  {"\n"}
-                  {"  "}
-                  <span className="code-comment">// User has API access</span>
-                  {"\n"}
-                  {"}"} <span className="code-keyword">else</span> {"{"}
-                  {"\n"}
-                  {"  "}
-                  <span className="code-keyword">return</span>{" "}
-                  <span className="code-function">Response</span>.
-                  <span className="code-function">json</span>({"{"} error:{" "}
-                  <span className="code-string">"Upgrade to Pro"</span> {"}"},{" "}
-                  {"{"} status: 403 {"}"});{"\n"}
-                  {"}"}
-                  {"\n\n"}
-                  <span className="code-comment">
-                    // Get full entitlement details (cached)
-                  </span>
-                  {"\n"}
-                  <span className="code-keyword">const</span> entitlement ={" "}
-                  <span className="code-keyword">await</span> billing.
-                  <span className="code-function">getEntitlement</span>(userId);
-                  {"\n"}
-                  <span className="code-comment">
-                    // {"{"} active: true, productId: "prod_pro", periodEnd: Date
-                    {"}"}
-                  </span>
-                </code>
-              </pre>
-            </div>
+function Features() {
+  return (
+    <section className="landing-features">
+      <div className="landing-container">
+        <h2>Features</h2>
+        <div className="landing-feature-grid">
+          <div className="landing-feature-card">
+            <div className="landing-feature-icon">⚡</div>
+            <h3>Entitlement Cache</h3>
+            <p>
+              Memory or Redis. Configurable TTL. Auto-invalidates when webhooks
+              arrive. Stop hitting Stripe on every request.
+            </p>
+          </div>
+          <div className="landing-feature-card">
+            <div className="landing-feature-icon">🎯</div>
+            <h3>Feature Gating</h3>
+            <p>
+              Declarative plan → features config. Check access with one line.
+              Supports wildcards for enterprise plans.
+            </p>
+          </div>
+          <div className="landing-feature-card">
+            <div className="landing-feature-icon">🔔</div>
+            <h3>Webhook Handling</h3>
+            <p>
+              Signature verification, typed events, automatic cache
+              invalidation. All providers normalize to the same event types.
+            </p>
+          </div>
+          <div className="landing-feature-card">
+            <div className="landing-feature-icon">🧪</div>
+            <h3>Mock Adapter</h3>
+            <p>
+              Full state control for testing. Create subscriptions, trigger
+              webhooks, test edge cases—no Stripe sandbox needed.
+            </p>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
+  );
+}
 
-      {/* Features */}
-      <section className="features">
-        <div className="container">
-          <h2>Why billing-sdk?</h2>
-          <div className="features-grid">
-            <div className="feature-card">
-              <div className="feature-icon">{"⚡"}</div>
-              <h3>Entitlement Caching</h3>
-              <p>
-                Memory or Redis cache with configurable TTL. Stop hitting Stripe
-                on every request. Auto-invalidates on webhook events.
-              </p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">{"🎯"}</div>
-              <h3>Feature Gating</h3>
-              <p>
-                Declarative plan → features config. Check access with one line:{" "}
-                <code>hasFeature(userId, "api")</code>. Supports wildcards for
-                enterprise plans.
-              </p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">{"🔔"}</div>
-              <h3>Webhook Handling</h3>
-              <p>
-                Signature verification, typed events, automatic cache
-                invalidation. All providers normalize to the same event types.
-              </p>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">{"🧪"}</div>
-              <h3>Test Without Stripe</h3>
-              <p>
-                Mock adapter with full state control. Create subscriptions,
-                trigger webhooks, test edge cases—no sandbox needed.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Providers */}
-      <section className="providers">
-        <div className="container">
-          <h2>Works with your payment provider</h2>
-          <div className="provider-grid">
-            <div className="provider-logo">
-              <svg viewBox="0 0 60 25" fill="currentColor">
-                <path d="M59.64 14.28h-8.06c.19 1.93 1.6 2.55 3.2 2.55 1.64 0 2.96-.37 4.05-.95v3.32a8.33 8.33 0 0 1-4.56 1.1c-4.01 0-6.83-2.5-6.83-7.48 0-4.19 2.39-7.52 6.3-7.52 3.92 0 5.96 3.28 5.96 7.5 0 .4-.02 1.04-.06 1.48zm-3.67-3.14c0-1.61-.77-2.98-2.34-2.98-1.52 0-2.43 1.3-2.55 2.98h4.89zM34.77 13.12c0-5.4 3.37-7.82 6.93-7.82 2.16 0 3.75.65 4.87 1.57l-1.91 3.23c-.67-.56-1.53-.88-2.48-.88-1.97 0-3.32 1.42-3.32 3.91 0 2.55 1.41 3.95 3.37 3.95.91 0 1.84-.35 2.56-1l1.78 3.3a7.33 7.33 0 0 1-4.87 1.57c-3.77 0-6.93-2.44-6.93-7.83zM23.53 5.88l3.9-.76v3.92h3.95v3.6h-3.95v3.72c0 1.4.62 1.98 1.53 1.98.59 0 1.17-.2 1.7-.4l.9 3.35c-.87.4-2.06.66-3.44.66-3.03 0-4.78-1.83-4.78-5.4V8.64h-2.07v-3.6h2.26v-.76zm-8.89 8.18c.37 1.13 1.35 1.97 2.94 1.97.97 0 1.91-.32 2.52-.76l1.78 3.1c-1.07.73-2.67 1.17-4.45 1.17-4.27 0-6.89-2.82-6.89-7.54 0-4.48 2.62-7.7 6.57-7.7 3.92 0 6.04 3.07 6.04 7.14 0 .74-.08 1.54-.19 2.16h-8.32v.46zm-.04-2.97h4.56c-.11-1.5-.85-2.82-2.21-2.82-1.34 0-2.18 1.2-2.35 2.82zM0 5.97l4.05-.79v10.77c0 2.77 1.32 3.35 2.63 3.35.64 0 1.19-.07 1.64-.2V5.97l4.05-.79v14.66c-1.42.58-3.43.96-5.58.96-4.05 0-6.79-1.47-6.79-6.2V5.97z" />
-              </svg>
-              Stripe
-            </div>
-            <div className="provider-logo">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="12" r="10" />
-              </svg>
-              Polar
-            </div>
-            <div className="provider-logo" style={{ opacity: 0.5 }}>
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <rect x="4" y="4" width="16" height="16" rx="2" />
-              </svg>
-              More soon
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="cta">
-        <div className="container">
-          <h2>Stop writing billing boilerplate</h2>
+function Providers() {
+  return (
+    <section className="landing-providers">
+      <div className="landing-container">
+        <div className="landing-providers-heading">
+          <h2>Providers</h2>
           <p>
-            One SDK for entitlements, caching, and feature gating. TypeScript
-            native.
+            Use the billing provider you already have. Your code stays the same.
           </p>
-          <div className="hero-buttons">
-            <a
-              href="https://github.com/MntRushmore/billing-sdk#readme"
-              className="btn btn-primary"
-            >
-              Read the Docs
-            </a>
-            <a
-              href="https://www.npmjs.com/package/@fuime/billing-sdk"
-              className="btn btn-secondary"
-            >
-              View on npm
-            </a>
+        </div>
+        <div className="landing-provider-band">
+          <div>
+            <svg viewBox="0 0 24 24">
+              <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z" />
+            </svg>
+            <span>Stripe</span>
+          </div>
+          <div>
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" />
+            </svg>
+            <span>Polar</span>
+          </div>
+          <div className="landing-provider-soon">
+            <svg viewBox="0 0 24 24">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+            </svg>
+            <span>+ More soon</span>
           </div>
         </div>
-      </section>
-    </>
+      </div>
+    </section>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="landing-footer landing-container">
+      <div className="landing-footer-brand">
+        <Link href="/">billing-sdk</Link>
+        <p>Open source TypeScript billing infrastructure.</p>
+      </div>
+      <nav className="landing-footer-nav">
+        <div className="landing-footer-group">
+          <span className="landing-footer-label">Product</span>
+          <a href="https://github.com/MntRushmore/billing-sdk#readme">
+            Docs ↗
+          </a>
+          <a href="https://github.com/MntRushmore/billing-sdk#quickstart">
+            Quickstart ↗
+          </a>
+        </div>
+        <div className="landing-footer-group">
+          <span className="landing-footer-label">Package</span>
+          <a href="https://www.npmjs.com/package/@fuime/billing-sdk">npm ↗</a>
+          <a href="https://github.com/MntRushmore/billing-sdk/blob/main/LICENSE">
+            MIT ↗
+          </a>
+        </div>
+        <div className="landing-footer-group">
+          <span className="landing-footer-label">Project</span>
+          <a href="https://github.com/MntRushmore/billing-sdk">GitHub ↗</a>
+          <a href="https://github.com/MntRushmore/billing-sdk/issues">
+            Issues ↗
+          </a>
+        </div>
+      </nav>
+    </footer>
   );
 }
