@@ -1,53 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
-import { billing } from "@/lib/billing";
+import { getBilling, getCurrentUserId } from "@/lib/billing";
 
-/**
- * POST /api/checkout
- *
- * Creates a Stripe checkout session for the given price.
- *
- * Request body:
- * {
- *   "priceId": "price_xxx",      // Stripe price ID
- *   "userId": "user_123",        // Your user ID (stored in metadata)
- *   "email": "user@example.com"  // Optional: pre-fill email
- * }
- *
- * Response:
- * {
- *   "url": "https://checkout.stripe.com/..."
- * }
- */
+export const runtime = "nodejs";
+/** Accept HTML forms or JSON { priceId }. Identity always comes from auth. */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { priceId, userId, email } = body;
-
-    if (!priceId || !userId) {
+    const userId = await getCurrentUserId();
+    if (!userId)
       return NextResponse.json(
-        { error: "Missing priceId or userId" },
-        { status: 400 }
+        { error: "Sign in to subscribe" },
+        { status: 401 },
+      );
+    const baseUrl = new URL(
+      process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+    ).origin;
+    if (request.headers.get("origin") !== baseUrl) {
+      return NextResponse.json(
+        { error: "Invalid request origin" },
+        { status: 403 },
       );
     }
-
-    // Get the base URL for success/cancel redirects
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-
-    // Create checkout session using billing-sdk
-    const checkout = await billing.createCheckout({
+    const isJson = request.headers
+      .get("content-type")
+      ?.includes("application/json");
+    let priceId: unknown;
+    try {
+      priceId = isJson
+        ? (await request.json())?.priceId
+        : (await request.formData()).get("priceId");
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid request body" },
+        { status: 400 },
+      );
+    }
+    const allowedPrices = [
+      process.env.STRIPE_PRO_PRICE_ID,
+      process.env.STRIPE_ENTERPRISE_PRICE_ID,
+    ].filter(Boolean);
+    if (typeof priceId !== "string" || !allowedPrices.includes(priceId)) {
+      return NextResponse.json({ error: "Unknown price" }, { status: 400 });
+    }
+    const checkout = await getBilling().createCheckout({
       priceId,
-      customerRef: userId, // This gets stored in subscription metadata
-      email,
+      customerRef: userId,
       successUrl: `${baseUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${baseUrl}/billing/cancel`,
     });
-
-    return NextResponse.json({ url: checkout.url });
+    return isJson
+      ? NextResponse.json({ url: checkout.url })
+      : NextResponse.redirect(checkout.url, 303);
   } catch (error) {
     console.error("Checkout error:", error);
     return NextResponse.json(
       { error: "Failed to create checkout session" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

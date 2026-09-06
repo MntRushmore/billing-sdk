@@ -6,7 +6,7 @@
  * construction to generate properly signed test payloads.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import Stripe from "stripe";
 import { stripe, type StripeProvider } from "./stripe.js";
 import { WebhookVerificationError } from "../types.js";
@@ -19,7 +19,7 @@ const TEST_API_KEY = "sk_test_fake_key_for_unit_tests";
 // Helper to generate signed webhook payloads
 function createSignedWebhookPayload(
   payload: object,
-  secret: string
+  secret: string,
 ): { body: string; signature: string } {
   const body = JSON.stringify(payload);
   const timestamp = Math.floor(Date.now() / 1000);
@@ -34,14 +34,16 @@ function createSignedWebhookPayload(
 }
 
 // Helper to create a mock Stripe subscription object
-function createMockSubscription(overrides: Partial<{
-  id: string;
-  status: Stripe.Subscription.Status;
-  cancel_at_period_end: boolean;
-  current_period_end: number;
-  metadata: Record<string, string>;
-  productId: string;
-}> = {}): object {
+function createMockSubscription(
+  overrides: Partial<{
+    id: string;
+    status: Stripe.Subscription.Status;
+    cancel_at_period_end: boolean;
+    current_period_end: number;
+    metadata: Record<string, string>;
+    productId: string;
+  }> = {},
+): object {
   const now = Math.floor(Date.now() / 1000);
   return {
     id: overrides.id ?? "sub_test123",
@@ -69,7 +71,7 @@ function createMockSubscription(overrides: Partial<{
 function createMockEvent(
   type: string,
   data: object,
-  previousAttributes?: object
+  previousAttributes?: object,
 ): object {
   return {
     id: `evt_test_${Date.now()}`,
@@ -121,7 +123,7 @@ describe("stripe adapter", () => {
           body: JSON.stringify({ type: "test" }),
           headers: {},
           secret: TEST_WEBHOOK_SECRET,
-        })
+        }),
       ).rejects.toThrow(WebhookVerificationError);
     });
 
@@ -131,7 +133,7 @@ describe("stripe adapter", () => {
           body: JSON.stringify({ type: "test" }),
           headers: { "stripe-signature": "t=123,v1=invalid" },
           secret: TEST_WEBHOOK_SECRET,
-        })
+        }),
       ).rejects.toThrow(WebhookVerificationError);
     });
 
@@ -140,7 +142,7 @@ describe("stripe adapter", () => {
       const event = createMockEvent("customer.subscription.created", sub);
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -161,7 +163,7 @@ describe("stripe adapter", () => {
       const event = createMockEvent("customer.subscription.created", sub);
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -188,11 +190,11 @@ describe("stripe adapter", () => {
       const event = createMockEvent(
         "customer.subscription.updated",
         sub,
-        { cancel_at_period_end: false } // Was false, now true
+        { cancel_at_period_end: false }, // Was false, now true
       );
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -221,14 +223,12 @@ describe("stripe adapter", () => {
         current_period_end: newPeriodEnd,
         metadata: { billing_sdk_customer_ref: "user_renew" },
       });
-      const event = createMockEvent(
-        "customer.subscription.updated",
-        sub,
-        { current_period_end: oldPeriodEnd }
-      );
+      const event = createMockEvent("customer.subscription.updated", sub, {
+        current_period_end: oldPeriodEnd,
+      });
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -253,7 +253,7 @@ describe("stripe adapter", () => {
       const event = createMockEvent("customer.subscription.deleted", sub);
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -281,7 +281,7 @@ describe("stripe adapter", () => {
       const event = createMockEvent("customer.subscription.deleted", sub);
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -304,7 +304,7 @@ describe("stripe adapter", () => {
       const event = createMockEvent("some.unknown.event", { foo: "bar" });
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -326,11 +326,11 @@ describe("stripe adapter", () => {
       const event = createMockEvent(
         "customer.subscription.updated",
         sub,
-        { description: "old description" } // Just a description change
+        { description: "old description" }, // Just a description change
       );
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -349,23 +349,59 @@ describe("stripe adapter", () => {
       expectedStatus: string;
       expectedActive: boolean;
     }> = [
-      { stripeStatus: "active", expectedStatus: "active", expectedActive: true },
-      { stripeStatus: "trialing", expectedStatus: "trialing", expectedActive: true },
-      { stripeStatus: "past_due", expectedStatus: "past_due", expectedActive: false },
-      { stripeStatus: "canceled", expectedStatus: "expired", expectedActive: false },
-      { stripeStatus: "incomplete", expectedStatus: "expired", expectedActive: false },
-      { stripeStatus: "incomplete_expired", expectedStatus: "expired", expectedActive: false },
-      { stripeStatus: "unpaid", expectedStatus: "expired", expectedActive: false },
-      { stripeStatus: "paused", expectedStatus: "expired", expectedActive: false },
+      {
+        stripeStatus: "active",
+        expectedStatus: "active",
+        expectedActive: true,
+      },
+      {
+        stripeStatus: "trialing",
+        expectedStatus: "trialing",
+        expectedActive: true,
+      },
+      {
+        stripeStatus: "past_due",
+        expectedStatus: "past_due",
+        expectedActive: false,
+      },
+      {
+        stripeStatus: "canceled",
+        expectedStatus: "expired",
+        expectedActive: false,
+      },
+      {
+        stripeStatus: "incomplete",
+        expectedStatus: "expired",
+        expectedActive: false,
+      },
+      {
+        stripeStatus: "incomplete_expired",
+        expectedStatus: "expired",
+        expectedActive: false,
+      },
+      {
+        stripeStatus: "unpaid",
+        expectedStatus: "expired",
+        expectedActive: false,
+      },
+      {
+        stripeStatus: "paused",
+        expectedStatus: "expired",
+        expectedActive: false,
+      },
     ];
 
-    for (const { stripeStatus, expectedStatus, expectedActive } of statusTests) {
+    for (const {
+      stripeStatus,
+      expectedStatus,
+      expectedActive,
+    } of statusTests) {
       it(`maps Stripe status "${stripeStatus}" to "${expectedStatus}" with active=${expectedActive}`, async () => {
         const sub = createMockSubscription({ status: stripeStatus });
         const event = createMockEvent("customer.subscription.created", sub);
         const { body, signature } = createSignedWebhookPayload(
           event,
-          TEST_WEBHOOK_SECRET
+          TEST_WEBHOOK_SECRET,
         );
 
         const result = await provider.handleWebhook({
@@ -391,7 +427,7 @@ describe("stripe adapter", () => {
       const event = createMockEvent("customer.subscription.created", sub);
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -408,7 +444,7 @@ describe("stripe adapter", () => {
       const event = createMockEvent("customer.subscription.created", sub);
       const { body, signature } = createSignedWebhookPayload(
         event,
-        TEST_WEBHOOK_SECRET
+        TEST_WEBHOOK_SECRET,
       );
 
       const result = await provider.handleWebhook({
@@ -438,14 +474,12 @@ describe("canceled vs ended distinction (Stripe)", () => {
       cancel_at_period_end: true,
       metadata: { billing_sdk_customer_ref: "user_cancel_test" },
     });
-    const event = createMockEvent(
-      "customer.subscription.updated",
-      sub,
-      { cancel_at_period_end: false }
-    );
+    const event = createMockEvent("customer.subscription.updated", sub, {
+      cancel_at_period_end: false,
+    });
     const { body, signature } = createSignedWebhookPayload(
       event,
-      TEST_WEBHOOK_SECRET
+      TEST_WEBHOOK_SECRET,
     );
 
     const result = await provider.handleWebhook({
@@ -469,7 +503,7 @@ describe("canceled vs ended distinction (Stripe)", () => {
     const event = createMockEvent("customer.subscription.deleted", sub);
     const { body, signature } = createSignedWebhookPayload(
       event,
-      TEST_WEBHOOK_SECRET
+      TEST_WEBHOOK_SECRET,
     );
 
     const result = await provider.handleWebhook({
@@ -482,5 +516,206 @@ describe("canceled vs ended distinction (Stripe)", () => {
     if (result.type === "subscription.ended") {
       expect(result.entitlement.active).toBe(false);
     }
+  });
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("Stripe provider regressions", () => {
+  const makeProvider = () =>
+    stripe({ apiKey: TEST_API_KEY, webhookSecret: TEST_WEBHOOK_SECRET });
+  async function webhook(type: string, data: object, previous?: object) {
+    const { body, signature } = createSignedWebhookPayload(
+      createMockEvent(type, data, previous),
+      TEST_WEBHOOK_SECRET,
+    );
+    return makeProvider().handleWebhook({
+      body,
+      headers: { "Stripe-Signature": signature },
+      secret: TEST_WEBHOOK_SECRET,
+    });
+  }
+  it("supports item-level billing periods in newer Stripe API versions", async () => {
+    const end = Math.floor(Date.now() / 1000) + 1000;
+    const sub = {
+      ...createMockSubscription(),
+      current_period_end: undefined,
+      items: {
+        data: [{ current_period_end: end, price: { product: "prod_new" } }],
+      },
+    };
+    expect(await webhook("customer.subscription.created", sub)).toMatchObject({
+      entitlement: { productId: "prod_new", periodEnd: new Date(end * 1000) },
+    });
+    expect(
+      await webhook("customer.subscription.updated", sub, {
+        items: { data: [{ current_period_end: end - 100 }] },
+      }),
+    ).toMatchObject({ type: "subscription.renewed" });
+  });
+  it("does not mistake unrelated changes for a newly scheduled cancellation", async () => {
+    const event = await webhook(
+      "customer.subscription.updated",
+      createMockSubscription({ cancel_at_period_end: true }),
+      { metadata: {} },
+    );
+    expect(event.type).toBe("unmapped");
+    expect(event.customerRef).toBe("user_123");
+  });
+  it.each(["invoice.paid", "invoice.payment_failed"])(
+    "extracts modern invoice attribution for %s",
+    async (type) => {
+      expect(
+        await webhook(type, {
+          amount_paid: 100,
+          amount_due: 200,
+          currency: "usd",
+          parent: {
+            subscription_details: {
+              metadata: { billing_sdk_customer_ref: "user_123" },
+            },
+          },
+        }),
+      ).toMatchObject({
+        customerRef: "user_123",
+        amount: type === "invoice.paid" ? 100 : 200,
+      });
+    },
+  );
+  it("protects reserved checkout identity in both metadata locations", async () => {
+    const provider = makeProvider();
+    const create = vi
+      .spyOn(provider.native.checkout.sessions, "create")
+      .mockResolvedValue({
+        id: "checkout",
+        url: "https://checkout.stripe.com/test",
+      } as never);
+    await provider.createCheckout({
+      priceId: "price_1",
+      customerRef: "user_123",
+      successUrl: "https://app.test",
+      metadata: { billing_sdk_customer_ref: "forged", campaign: "launch" },
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { billing_sdk_customer_ref: "user_123", campaign: "launch" },
+        subscription_data: {
+          metadata: {
+            billing_sdk_customer_ref: "user_123",
+            campaign: "launch",
+          },
+        },
+      }),
+    );
+  });
+  it("paginates search and prefers accessible subscriptions over canceled history", async () => {
+    const provider = makeProvider();
+    const search = vi
+      .spyOn(provider.native.subscriptions, "search")
+      .mockResolvedValueOnce({
+        data: [createMockSubscription({ status: "canceled" })],
+        has_more: true,
+        next_page: "page_2",
+      } as never)
+      .mockResolvedValueOnce({
+        data: [createMockSubscription({ productId: "prod_current" })],
+        has_more: false,
+      } as never);
+    expect(await provider.getEntitlement("user_123")).toMatchObject({
+      active: true,
+      productId: "prod_current",
+    });
+    expect(search).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ page: "page_2", limit: 100 }),
+    );
+  });
+  it("escapes customer references before embedding them in search syntax", async () => {
+    const provider = makeProvider();
+    const search = vi
+      .spyOn(provider.native.subscriptions, "search")
+      .mockResolvedValue({ data: [], has_more: false } as never);
+    const ref = 'user" OR status:"active';
+    await provider.getEntitlement(ref);
+    expect(search.mock.calls[0]![0].query).toBe(
+      'metadata["billing_sdk_customer_ref"]:"user\\" OR status:\\"active"',
+    );
+  });
+  it("does not accept a search result attributed to a different user", async () => {
+    const provider = makeProvider();
+    vi.spyOn(provider.native.subscriptions, "search").mockResolvedValue({
+      data: [
+        createMockSubscription({
+          metadata: { billing_sdk_customer_ref: "another_user" },
+        }),
+      ],
+      has_more: false,
+    } as never);
+    expect(await provider.getEntitlement("user_123")).toBeNull();
+  });
+  it("supports direct customer mapping for immediate reads and checkout reuse", async () => {
+    const provider = stripe({
+      apiKey: TEST_API_KEY,
+      webhookSecret: TEST_WEBHOOK_SECRET,
+      resolveCustomerId: async () => "cus_mapped",
+    });
+    const list = vi
+      .spyOn(provider.native.subscriptions, "list")
+      .mockResolvedValue({
+        data: [createMockSubscription()],
+        has_more: false,
+      } as never);
+    const search = vi.spyOn(provider.native.subscriptions, "search");
+    expect((await provider.getEntitlement("user_123"))?.active).toBe(true);
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_mapped", status: "all" }),
+    );
+    expect(search).not.toHaveBeenCalled();
+    const create = vi
+      .spyOn(provider.native.checkout.sessions, "create")
+      .mockResolvedValue({
+        id: "checkout",
+        url: "https://checkout.stripe.com/test",
+      } as never);
+    await provider.createCheckout({
+      priceId: "price",
+      customerRef: "user_123",
+      email: "user@test.com",
+      successUrl: "https://app.test",
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customer: "cus_mapped",
+        customer_email: undefined,
+      }),
+    );
+  });
+  it("opens a mapped customer's portal without requiring subscription history", async () => {
+    const provider = stripe({
+      apiKey: TEST_API_KEY,
+      webhookSecret: TEST_WEBHOOK_SECRET,
+      resolveCustomerId: async () => "cus_mapped",
+    });
+    const create = vi
+      .spyOn(provider.native.billingPortal.sessions, "create")
+      .mockResolvedValue({ url: "https://billing.stripe.com/test" } as never);
+    await provider.createPortalSession!("user", "https://app.test");
+    expect(create).toHaveBeenCalledWith({
+      customer: "cus_mapped",
+      return_url: "https://app.test",
+    });
+  });
+  it("propagates API errors and rejects invalid refund inputs before sending", async () => {
+    const provider = makeProvider();
+    vi.spyOn(provider.native.subscriptions, "search").mockRejectedValue(
+      new Error("429"),
+    );
+    await expect(provider.getEntitlement("user")).rejects.toThrow("429");
+    const refund = vi.spyOn(provider.native.refunds, "create");
+    await expect(provider.refund!("not_a_payment", 100)).rejects.toThrow(
+      TypeError,
+    );
+    await expect(provider.refund!("pi_123", -1)).rejects.toThrow(RangeError);
+    expect(refund).not.toHaveBeenCalled();
   });
 });

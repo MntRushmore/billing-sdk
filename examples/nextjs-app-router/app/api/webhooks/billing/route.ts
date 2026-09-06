@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { billing } from "@/lib/billing";
+import { getBilling } from "@/lib/billing";
+import { WebhookVerificationError } from "@fuime/billing-sdk";
+
+export const runtime = "nodejs";
 
 /**
  * POST /api/webhooks/billing
@@ -22,13 +25,13 @@ export async function POST(request: NextRequest) {
     if (!signature) {
       return NextResponse.json(
         { error: "Missing stripe-signature header" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     // Process webhook with billing-sdk
     // This verifies signature, parses event, and invalidates cache
-    const event = await billing.handleWebhook({
+    const event = await getBilling().handleWebhook({
       body,
       headers: { "stripe-signature": signature },
       secret: process.env.STRIPE_WEBHOOK_SECRET!,
@@ -92,23 +95,21 @@ export async function POST(request: NextRequest) {
         break;
     }
 
-    // Always return 200 to acknowledge receipt
+    // Acknowledge only after processing succeeds. Persist event.id in your
+    // database transaction before non-idempotent side effects.
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Webhook error:", error);
 
     // Return 400 for signature verification failures
-    // This tells Stripe to retry later
-    if (error instanceof Error && error.message.includes("signature")) {
-      return NextResponse.json(
-        { error: "Invalid signature" },
-        { status: 400 }
-      );
+    // Operational failures below return 500 so delivery can be retried.
+    if (error instanceof WebhookVerificationError) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
     }
 
     return NextResponse.json(
       { error: "Webhook handler failed" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -12,7 +12,15 @@ import type { Entitlement } from "../types.js";
  *
  * Implement this to use your own caching backend (Redis, Memcached, etc.)
  */
+export type CacheLookup =
+  | { hit: false }
+  | { hit: true; value: Entitlement | null };
+
 export interface CacheAdapter {
+  /** Distinguishes a cached null from a miss. Optional for legacy adapters. */
+  lookup?(customerRef: string): Promise<CacheLookup>;
+  /** Release owned resources, if any. */
+  dispose?(): void | Promise<void>;
   /**
    * Get a cached entitlement by customerRef.
    * Returns null if not in cache or expired.
@@ -25,7 +33,11 @@ export interface CacheAdapter {
    * @param entitlement - The entitlement to cache (null means "no subscription")
    * @param ttlMs - Time to live in milliseconds
    */
-  set(customerRef: string, entitlement: Entitlement | null, ttlMs: number): Promise<void>;
+  set(
+    customerRef: string,
+    entitlement: Entitlement | null,
+    ttlMs: number,
+  ): Promise<void>;
 
   /**
    * Invalidate (delete) a cached entitlement.
@@ -44,6 +56,8 @@ export interface CacheAdapter {
  * Cache configuration options.
  */
 export interface CacheOptions {
+  /** Key namespace; defaults to provider.name. Use an account-specific value when sharing a cache. */
+  namespace?: string;
   /**
    * The cache adapter to use.
    * Defaults to in-memory cache if not specified.

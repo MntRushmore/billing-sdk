@@ -30,54 +30,104 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./mock": {
-      "types": "./dist/mock.d.ts",
-      "import": "./dist/mock.js",
-      "require": "./dist/mock.cjs"
+      "import": {
+        "types": "./dist/mock.d.ts",
+        "default": "./dist/mock.js"
+      },
+      "require": {
+        "types": "./dist/mock.d.cts",
+        "default": "./dist/mock.cjs"
+      }
     },
     "./stripe": {
-      "types": "./dist/stripe.d.ts",
-      "import": "./dist/stripe.js",
-      "require": "./dist/stripe.cjs"
+      "import": {
+        "types": "./dist/stripe.d.ts",
+        "default": "./dist/stripe.js"
+      },
+      "require": {
+        "types": "./dist/stripe.d.cts",
+        "default": "./dist/stripe.cjs"
+      }
     },
     "./polar": {
-      "types": "./dist/polar.d.ts",
-      "import": "./dist/polar.js",
-      "require": "./dist/polar.cjs"
+      "import": {
+        "types": "./dist/polar.d.ts",
+        "default": "./dist/polar.js"
+      },
+      "require": {
+        "types": "./dist/polar.d.cts",
+        "default": "./dist/polar.cjs"
+      }
     },
     "./conformance": {
-      "types": "./dist/conformance.d.ts",
-      "import": "./dist/conformance.js",
-      "require": "./dist/conformance.cjs"
+      "import": {
+        "types": "./dist/conformance.d.ts",
+        "default": "./dist/conformance.js"
+      },
+      "require": {
+        "types": "./dist/conformance.d.cts",
+        "default": "./dist/conformance.cjs"
+      }
     },
     "./conformance/mock-harness": {
-      "types": "./dist/conformance/mock-harness.d.ts",
-      "import": "./dist/conformance/mock-harness.js",
-      "require": "./dist/conformance/mock-harness.cjs"
+      "import": {
+        "types": "./dist/conformance/mock-harness.d.ts",
+        "default": "./dist/conformance/mock-harness.js"
+      },
+      "require": {
+        "types": "./dist/conformance/mock-harness.d.cts",
+        "default": "./dist/conformance/mock-harness.cjs"
+      }
     },
     "./conformance/stripe-harness": {
-      "types": "./dist/conformance/stripe-harness.d.ts",
-      "import": "./dist/conformance/stripe-harness.js",
-      "require": "./dist/conformance/stripe-harness.cjs"
+      "import": {
+        "types": "./dist/conformance/stripe-harness.d.ts",
+        "default": "./dist/conformance/stripe-harness.js"
+      },
+      "require": {
+        "types": "./dist/conformance/stripe-harness.d.cts",
+        "default": "./dist/conformance/stripe-harness.cjs"
+      }
     },
     "./cache": {
-      "types": "./dist/cache.d.ts",
-      "import": "./dist/cache.js",
-      "require": "./dist/cache.cjs"
+      "import": {
+        "types": "./dist/cache.d.ts",
+        "default": "./dist/cache.js"
+      },
+      "require": {
+        "types": "./dist/cache.d.cts",
+        "default": "./dist/cache.cjs"
+      }
     },
     "./cache/memory": {
-      "types": "./dist/cache/memory.d.ts",
-      "import": "./dist/cache/memory.js",
-      "require": "./dist/cache/memory.cjs"
+      "import": {
+        "types": "./dist/cache/memory.d.ts",
+        "default": "./dist/cache/memory.js"
+      },
+      "require": {
+        "types": "./dist/cache/memory.d.cts",
+        "default": "./dist/cache/memory.cjs"
+      }
     },
     "./cache/redis": {
-      "types": "./dist/cache/redis.d.ts",
-      "import": "./dist/cache/redis.js",
-      "require": "./dist/cache/redis.cjs"
+      "import": {
+        "types": "./dist/cache/redis.d.ts",
+        "default": "./dist/cache/redis.js"
+      },
+      "require": {
+        "types": "./dist/cache/redis.d.cts",
+        "default": "./dist/cache/redis.cjs"
+      }
     }
   },
   "files": [
@@ -87,7 +137,10 @@
     "build": "tsup",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:package": "node scripts/check-package.mjs",
+    "check": "pnpm typecheck && pnpm test:run && pnpm build && pnpm test:package",
+    "prepublishOnly": "pnpm check"
   },
   "engines": {
     "node": ">=22"
@@ -119,6 +172,7 @@
     }
   },
   "dependencies": {
-    "@polar-sh/sdk": "^0.49.0"
+    "@polar-sh/sdk": "^0.49.0",
+    "standardwebhooks": "^1.1.1"
   }
 }

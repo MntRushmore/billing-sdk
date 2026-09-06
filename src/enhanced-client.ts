@@ -1,343 +1,301 @@
-/**
- * Enhanced billing client with caching and feature gating.
- *
- * This wraps the base BillingProvider with:
- * - Entitlement caching (memory or Redis)
- * - Feature gating based on plan definitions
- * - Automatic cache invalidation on webhooks
- */
-
-import type { BillingProvider, BillingEvent, Entitlement, WebhookRequest } from "./types.js";
+import type {
+  BillingClient,
+  BillingEvent,
+  BillingProvider,
+  Entitlement,
+} from "./types.js";
 import type { CacheAdapter, CacheOptions } from "./cache/types.js";
-import type { PlanConfig, FeatureCheckResult } from "./features/types.js";
+import type {
+  PlanConfig,
+  FeatureCheckResult,
+  LimitCheckResult,
+} from "./features/types.js";
+import { FeatureAccessError, definePlans } from "./features/index.js";
 import { memoryCache } from "./cache/memory.js";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface EnhancedClientOptions {
-  /**
-   * The billing provider to wrap.
-   */
   provider: BillingProvider;
-
-  /**
-   * Cache configuration.
-   * Pass false to disable caching entirely.
-   */
+  /** Caching is enabled by default. Custom adapters remain owned by the caller. */
   cache?: CacheOptions | false;
-
-  /**
-   * Feature gating configuration.
-   * Map of product IDs to their feature sets.
-   */
   plans?: PlanConfig;
-
-  /**
-   * Default features for users without subscriptions.
-   */
-  defaultFeatures?: string[];
+  defaultFeatures?: readonly string[];
+  /** Defaults to true for compatibility. Set false to deny unknown paid plans. */
+  allowUnknownPlans?: boolean;
 }
 
-export interface EnhancedBillingClient {
-  /** Provider name */
-  readonly name: string;
-
-  /** Provider capabilities */
-  readonly capabilities: BillingProvider["capabilities"];
-
-  /**
-   * Get entitlement for a customer.
-   * Uses cache if configured.
-   */
-  getEntitlement(customerRef: string): Promise<Entitlement | null>;
-
-  /**
-   * Handle webhook and auto-invalidate cache.
-   */
-  handleWebhook(req: WebhookRequest): Promise<BillingEvent>;
-
-  /**
-   * Create a checkout session.
-   */
-  createCheckout: BillingProvider["createCheckout"];
-
-  /**
-   * Create a customer portal session (if supported).
-   */
-  createPortalSession?: BillingProvider["createPortalSession"];
-
-  /**
-   * Issue a refund (if supported).
-   */
-  refund?: BillingProvider["refund"];
-
-  /**
-   * Check if customer has access to a specific feature.
-   * Returns false if no subscription or feature not in plan.
-   */
+export interface EnhancedBillingClient extends BillingClient {
   hasFeature(customerRef: string, feature: string): Promise<boolean>;
-
-  /**
-   * Get all features available to a customer.
-   */
+  /** Wildcard plans enumerate only features declared somewhere in this config. */
   getFeatures(customerRef: string): Promise<string[]>;
-
-  /**
-   * Check feature access with detailed result.
-   */
-  checkFeature(customerRef: string, feature: string): Promise<FeatureCheckResult>;
-
-  /**
-   * Manually invalidate cache for a customer.
-   */
+  checkFeature(
+    customerRef: string,
+    feature: string,
+  ): Promise<FeatureCheckResult>;
+  /** Evaluate several features using one entitlement snapshot. */
+  checkFeatures(
+    customerRef: string,
+    features: readonly string[],
+  ): Promise<Record<string, FeatureCheckResult>>;
+  /** Throw FeatureAccessError when access is denied. */
+  requireFeature(customerRef: string, feature: string): Promise<void>;
+  /** Compare a caller-supplied usage snapshot; does not record or reserve usage. */
+  checkLimit(
+    customerRef: string,
+    limit: string,
+    used: number,
+    requested?: number,
+  ): Promise<LimitCheckResult>;
   invalidateCache(customerRef: string): Promise<void>;
-
-  /**
-   * Invalidate all cached entitlements.
-   */
   invalidateAllCache(): Promise<void>;
-
-  /**
-   * Access the underlying provider.
-   */
-  native<T>(): T;
+  /** Dispose only the internally created cache. */
+  dispose(): Promise<void>;
 }
 
-// ---------------------------------------------------------------------------
-// Implementation
-// ---------------------------------------------------------------------------
-
-const DEFAULT_TTL_MS = 60_000; // 1 minute
-const DEFAULT_NULL_TTL_MS = 10_000; // 10 seconds for "no subscription" results
-
-/**
- * Creates an enhanced billing client with caching and feature gating.
- *
- * @example
- * ```ts
- * import { createEnhancedClient } from "@fuime/billing-sdk";
- * import { stripe } from "@fuime/billing-sdk/stripe";
- *
- * const billing = createEnhancedClient({
- *   provider: stripe({ ... }),
- *   cache: { ttlMs: 60_000 },
- *   plans: {
- *     "prod_free": { features: ["basic"] },
- *     "prod_pro": { features: ["basic", "advanced", "api"] },
- *     "prod_enterprise": { features: "*" },
- *   },
- *   defaultFeatures: ["basic"],
- * });
- *
- * // Check access
- * if (await billing.hasFeature("user_123", "api")) {
- *   // Allow API access
- * }
- * ```
- */
-export function createEnhancedClient(options: EnhancedClientOptions): EnhancedBillingClient {
-  const { provider, plans = {}, defaultFeatures = [] } = options;
-
-  // Set up cache
-  let cache: CacheAdapter | null = null;
-  let ttlMs = DEFAULT_TTL_MS;
-  let nullTtlMs = DEFAULT_NULL_TTL_MS;
-  let cacheNulls = true;
-
-  if (options.cache !== false) {
-    const cacheOpts = options.cache ?? {};
-    cache = cacheOpts.adapter ?? memoryCache();
-    ttlMs = cacheOpts.ttlMs ?? DEFAULT_TTL_MS;
-    nullTtlMs = cacheOpts.nullTtlMs ?? DEFAULT_NULL_TTL_MS;
-    cacheNulls = cacheOpts.cacheNulls ?? true;
+export function createEnhancedClient(
+  options: EnhancedClientOptions,
+): EnhancedBillingClient {
+  const { provider, allowUnknownPlans = true } = options;
+  const plans = definePlans(structuredClone(options.plans ?? {}));
+  const defaultFeatures = [...new Set(options.defaultFeatures ?? [])];
+  const cacheOptions =
+    options.cache === false ? undefined : (options.cache ?? {});
+  const ttlMs = cacheOptions?.ttlMs ?? 60_000;
+  const nullTtlMs = cacheOptions?.nullTtlMs ?? 10_000;
+  for (const ttl of [ttlMs, nullTtlMs]) {
+    if (!Number.isFinite(ttl) || ttl < 0)
+      throw new RangeError("Cache TTL must be nonnegative and finite");
   }
-
-  // Compute all features for "*" expansion
-  const allFeatures = new Set<string>();
+  const cache: CacheAdapter | null = cacheOptions
+    ? (cacheOptions.adapter ?? memoryCache())
+    : null;
+  const namespace = cacheOptions?.namespace ?? provider.name;
+  const key = (ref: string) => `${namespace.length}:${namespace}:${ref}`;
+  const allFeatures = new Set(defaultFeatures);
   for (const plan of Object.values(plans)) {
-    if (Array.isArray(plan.features)) {
-      plan.features.forEach((f) => allFeatures.add(f));
+    if (plan.features !== "*")
+      for (const feature of plan.features) allFeatures.add(feature);
+  }
+  const getPlan = (id: string) =>
+    Object.hasOwn(plans, id) ? plans[id] : undefined;
+
+  // Coalesce concurrent reads. Serialize cache mutations so a slow write cannot
+  // land after an invalidation. Epochs also discard stale provider responses.
+  // This coordination is local to this client, not a distributed lock.
+  const pending = new Map<
+    string,
+    { promise: Promise<Entitlement | null>; invalidated: boolean }
+  >();
+  let epoch = 0;
+  let mutations: Promise<void> = Promise.resolve();
+  function mutate(action: () => Promise<void>): Promise<void> {
+    const operation = mutations.then(action);
+    mutations = operation.catch(() => {});
+    return operation;
+  }
+  function current(value: Entitlement | null): Entitlement | null {
+    if (!value) return null;
+    const result = structuredClone(value);
+    if (
+      result.status === "canceled" &&
+      result.periodEnd &&
+      result.periodEnd.getTime() <= Date.now()
+    ) {
+      result.active = false;
+      result.status = "expired";
+    }
+    return result;
+  }
+  async function read(
+    ref: string,
+    token: { invalidated: boolean },
+  ): Promise<Entitlement | null> {
+    while (true) {
+      const version = epoch;
+      await mutations;
+      if (cache) {
+        const cached = cache.lookup
+          ? await cache.lookup(key(ref))
+          : await cache
+              .get(key(ref))
+              .then((value) =>
+                value === null
+                  ? { hit: false as const }
+                  : { hit: true as const, value },
+              );
+        if (version !== epoch || token.invalidated) return getEntitlement(ref);
+        if (cached.hit) return current(cached.value);
+      }
+      const value = current(await provider.getEntitlement(ref));
+      if (version !== epoch || token.invalidated) return getEntitlement(ref);
+      if (cache && (value !== null || cacheOptions?.cacheNulls !== false)) {
+        let ttl = value === null ? nullTtlMs : ttlMs;
+        if (value?.active && value.periodEnd)
+          ttl = Math.min(
+            ttl,
+            Math.max(0, value.periodEnd.getTime() - Date.now()),
+          );
+        if (ttl > 0)
+          await mutate(async () => {
+            if (version === epoch && !token.invalidated)
+              await cache.set(key(ref), value, ttl);
+          });
+      }
+      if (version === epoch && !token.invalidated) return value;
+      return getEntitlement(ref);
     }
   }
-  defaultFeatures.forEach((f) => allFeatures.add(f));
-
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
-
-  async function getCachedEntitlement(customerRef: string): Promise<Entitlement | null> {
-    if (!cache) {
-      return provider.getEntitlement(customerRef);
+  async function getEntitlement(ref: string): Promise<Entitlement | null> {
+    let request = pending.get(ref);
+    if (!request) {
+      const token = {
+        invalidated: false,
+        promise: undefined as unknown as Promise<Entitlement | null>,
+      };
+      token.promise = read(ref, token);
+      request = token;
+      pending.set(ref, request);
     }
-
-    // Check cache first
-    const cached = await cache.get(customerRef);
-    if (cached !== null) {
-      return cached;
+    try {
+      return current(await request.promise);
+    } finally {
+      if (pending.get(ref) === request) pending.delete(ref);
     }
-
-    // Cache miss - fetch from provider
-    const entitlement = await provider.getEntitlement(customerRef);
-
-    // Store in cache
-    if (entitlement !== null) {
-      await cache.set(customerRef, entitlement, ttlMs);
-    } else if (cacheNulls) {
-      await cache.set(customerRef, null, nullTtlMs);
-    }
-
-    return entitlement;
   }
-
-  function getFeaturesForPlan(productId: string | undefined): string[] {
-    if (!productId) {
-      return [...defaultFeatures];
+  function check(
+    entitlement: Entitlement | null,
+    feature: string,
+  ): FeatureCheckResult {
+    const productId = entitlement?.productId;
+    if (!entitlement?.active) {
+      const allowed = defaultFeatures.includes(feature);
+      return {
+        allowed,
+        reason: allowed ? "default" : "no_subscription",
+        ...(productId ? { productId } : {}),
+      };
     }
-
-    const plan = plans[productId];
+    const plan = getPlan(entitlement.productId);
     if (!plan) {
-      // Unknown plan - return defaults
-      return [...defaultFeatures];
+      const allowed = allowUnknownPlans && defaultFeatures.includes(feature);
+      return {
+        allowed,
+        reason: allowed ? "default" : "unknown_plan",
+        productId,
+      };
     }
-
-    if (plan.features === "*") {
-      return [...allFeatures];
-    }
-
-    return [...plan.features];
+    const allowed = plan.features === "*" || plan.features.includes(feature);
+    return {
+      allowed,
+      reason: allowed ? "plan_feature" : "feature_not_in_plan",
+      productId,
+    };
   }
-
-  // ---------------------------------------------------------------------------
-  // Client implementation
-  // ---------------------------------------------------------------------------
 
   const client: EnhancedBillingClient = {
     get name() {
       return provider.name;
     },
-
     get capabilities() {
       return provider.capabilities;
     },
-
-    async getEntitlement(customerRef: string): Promise<Entitlement | null> {
-      return getCachedEntitlement(customerRef);
-    },
-
-    async handleWebhook(req: WebhookRequest): Promise<BillingEvent> {
-      const event = await provider.handleWebhook(req);
-
-      // Auto-invalidate cache on subscription events
-      if (cache && event.customerRef) {
-        const invalidatingEvents = [
-          "subscription.started",
-          "subscription.renewed",
-          "subscription.canceled",
-          "subscription.ended",
-        ];
-        if (invalidatingEvents.includes(event.type)) {
-          await cache.invalidate(event.customerRef);
-        }
-      }
-
-      return event;
-    },
-
+    getEntitlement,
     createCheckout: provider.createCheckout.bind(provider),
-
     ...(provider.createPortalSession && {
       createPortalSession: provider.createPortalSession.bind(provider),
     }),
-
-    ...(provider.refund && {
-      refund: provider.refund.bind(provider),
-    }),
-
-    async hasFeature(customerRef: string, feature: string): Promise<boolean> {
-      const result = await client.checkFeature(customerRef, feature);
-      return result.allowed;
-    },
-
-    async getFeatures(customerRef: string): Promise<string[]> {
-      const entitlement = await getCachedEntitlement(customerRef);
-
-      if (!entitlement || !entitlement.active) {
-        return [...defaultFeatures];
-      }
-
-      return getFeaturesForPlan(entitlement.productId);
-    },
-
-    async checkFeature(customerRef: string, feature: string): Promise<FeatureCheckResult> {
-      const entitlement = await getCachedEntitlement(customerRef);
-
-      // No subscription
-      if (!entitlement) {
-        const allowed = defaultFeatures.includes(feature);
-        return {
-          allowed,
-          reason: allowed ? "default" : "no_subscription",
-        };
-      }
-
-      // Has subscription but not active
-      if (!entitlement.active) {
-        const allowed = defaultFeatures.includes(feature);
-        return {
-          allowed,
-          reason: allowed ? "default" : "no_subscription",
-          productId: entitlement.productId,
-        };
-      }
-
-      // Active subscription - check plan
-      const plan = plans[entitlement.productId];
-
-      if (!plan) {
-        // Unknown plan - grant defaults only
-        const allowed = defaultFeatures.includes(feature);
-        return {
-          allowed,
-          reason: allowed ? "default" : "unknown_plan",
-          productId: entitlement.productId,
-        };
-      }
-
-      // Check if feature is in plan
-      if (plan.features === "*") {
-        return {
-          allowed: true,
-          reason: "plan_feature",
-          productId: entitlement.productId,
-        };
-      }
-
-      const allowed = plan.features.includes(feature);
-      return {
-        allowed,
-        reason: allowed ? "plan_feature" : "feature_not_in_plan",
-        productId: entitlement.productId,
-      };
-    },
-
-    async invalidateCache(customerRef: string): Promise<void> {
-      if (cache) {
-        await cache.invalidate(customerRef);
-      }
-    },
-
-    async invalidateAllCache(): Promise<void> {
-      if (cache) {
-        await cache.invalidateAll();
-      }
-    },
-
+    ...(provider.refund && { refund: provider.refund.bind(provider) }),
     native<T>(): T {
       return provider.native as T;
     },
+    async handleWebhook(req): Promise<BillingEvent> {
+      const event = await provider.handleWebhook(req);
+      // Even unmapped status/product changes and payment failures can affect access.
+      if (event.customerRef !== null)
+        await client.invalidateCache(event.customerRef);
+      return event;
+    },
+    async hasFeature(ref, feature) {
+      return (await client.checkFeature(ref, feature)).allowed;
+    },
+    async checkFeature(ref, feature) {
+      return check(await getEntitlement(ref), feature);
+    },
+    async checkFeatures(ref, features) {
+      const entitlement = await getEntitlement(ref);
+      return Object.fromEntries(
+        features.map((feature) => [feature, check(entitlement, feature)]),
+      );
+    },
+    async requireFeature(ref, feature) {
+      const result = await client.checkFeature(ref, feature);
+      if (!result.allowed) throw new FeatureAccessError(ref, feature, result);
+    },
+    async getFeatures(ref) {
+      const entitlement = await getEntitlement(ref);
+      if (!entitlement?.active) return [...defaultFeatures];
+      const plan = getPlan(entitlement.productId);
+      if (!plan) return allowUnknownPlans ? [...defaultFeatures] : [];
+      return plan.features === "*"
+        ? [...allFeatures]
+        : [...new Set(plan.features)];
+    },
+    async checkLimit(ref, name, used, requested = 1) {
+      if (
+        ![used, requested].every(
+          (value) => Number.isSafeInteger(value) && value >= 0,
+        )
+      ) {
+        throw new RangeError(
+          "used and requested must be nonnegative safe integers",
+        );
+      }
+      const entitlement = await getEntitlement(ref);
+      const limits = entitlement?.active
+        ? getPlan(entitlement.productId)?.limits
+        : undefined;
+      const limit =
+        limits && Object.hasOwn(limits, name) ? limits[name] : undefined;
+      if (limit === undefined)
+        return {
+          allowed: false,
+          reason: "no_limit_defined",
+          limit: null,
+          remaining: null,
+        };
+      if (limit === "unlimited")
+        return {
+          allowed: true,
+          reason: "within_limit",
+          limit,
+          remaining: null,
+        };
+      return {
+        allowed: used <= limit && requested <= limit - used,
+        reason:
+          used <= limit && requested <= limit - used
+            ? "within_limit"
+            : "limit_exceeded",
+        limit,
+        remaining: Math.max(0, limit - used),
+      };
+    },
+    async invalidateCache(ref) {
+      const request = pending.get(ref);
+      if (request) request.invalidated = true;
+      pending.delete(ref);
+      if (cache) await mutate(() => cache.invalidate(key(ref)));
+    },
+    async invalidateAllCache() {
+      epoch++;
+      pending.clear();
+      if (cache) await mutate(() => cache.invalidateAll());
+    },
+    async dispose() {
+      epoch++;
+      pending.clear();
+      await mutations;
+      if (cache && !cacheOptions?.adapter) await cache.dispose?.();
+    },
   };
-
   return client;
 }

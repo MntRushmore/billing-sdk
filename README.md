@@ -1,52 +1,63 @@
 # @fuime/billing-sdk
 
-Typed billing interface across payment providers. Answers the question: **"can this user access the thing right now?"**
+**One TypeScript API for subscription access across Stripe, Polar, and a local testing provider.**
 
-This SDK models subscription state and entitlements—not checkout wrappers. It provides a unified interface to query whether a user has access, handle webhooks, and manage the subscription lifecycle.
+Define which features belong to each product, then ask whether a customer can use them. Provider-native checkout, subscription status, signed webhooks, and optional caching sit behind the same interface.
 
-## Installation
+Requires Node.js 22+. Works with ESM and CommonJS. Server-side only: keep provider keys and access decisions on your server.
+
+## Try it without payment credentials
 
 ```bash
 pnpm add @fuime/billing-sdk
 ```
 
-For specific providers, also install their SDKs:
+```ts
+import { createEnhancedClient, definePlans } from "@fuime/billing-sdk";
+import { mock } from "@fuime/billing-sdk/mock";
 
-```bash
-# For Stripe
-pnpm add stripe
-
-# For Polar (SDK included)
-# Nothing extra needed
-```
-
-## Quick Start
-
-```typescript
-import { createBillingClient } from "@fuime/billing-sdk";
-import { stripe } from "@fuime/billing-sdk/stripe";
-
-const billing = createBillingClient({
-  provider: stripe({
-    apiKey: process.env.STRIPE_SECRET_KEY!,
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
-  }),
+const provider = mock();
+provider._testing.createSubscription({
+  customerRef: "user_123",
+  productId: "prod_pro",
 });
 
-// Check if user has access
-const entitlement = await billing.getEntitlement("user_123");
-if (entitlement?.active) {
-  // User has access
-}
+const billing = createEnhancedClient({
+  provider,
+  plans: definePlans({
+    prod_pro: {
+      features: ["exports", "api"],
+      limits: { seats: 5, projects: 20 },
+    },
+    prod_enterprise: {
+      features: "*",
+      limits: { seats: "unlimited" },
+    },
+  }),
+  defaultFeatures: ["read"],
+});
+
+await billing.hasFeature("user_123", "api"); // true
+await billing.checkFeatures("user_123", ["api", "sso"]);
+// { api: { allowed: true, ... }, sso: { allowed: false, ... } }
+
+await billing.checkLimit("user_123", "seats", 4);
+// { allowed: true, reason: "within_limit", limit: 5, remaining: 1 }
+
+await billing.dispose(); // Releases the internally owned memory cache.
 ```
 
-## Enhanced Client (Cache + Feature Gating)
+`definePlans` preserves literal types and validates features and quotas. It does not make `hasFeature` reject undeclared strings at compile time. A wildcard grants any feature string; `getFeatures` can enumerate only features declared in this catalog or in defaults.
 
-For most apps, use `createEnhancedClient` instead of `createBillingClient`. It adds:
-- **Entitlement caching** - Don't hit Stripe on every request
-- **Feature gating** - Define what each plan can access
+## Connect a provider
 
-```typescript
+### Stripe
+
+```bash
+pnpm add stripe
+```
+
+```ts
 import { createEnhancedClient } from "@fuime/billing-sdk";
 import { stripe } from "@fuime/billing-sdk/stripe";
 
@@ -54,355 +65,201 @@ const billing = createEnhancedClient({
   provider: stripe({
     apiKey: process.env.STRIPE_SECRET_KEY!,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
+    // Recommended once your application stores Stripe customer IDs:
+    // resolveCustomerId: async userId => db.users.getStripeCustomerId(userId),
   }),
-
-  // Cache entitlements for 1 minute
-  cache: { ttlMs: 60_000 },
-
-  // Define features per plan
   plans: {
-    "prod_free": { features: ["basic_export"] },
-    "prod_pro": { features: ["basic_export", "api_access", "priority_support"] },
-    "prod_enterprise": { features: "*" }, // All features
-  },
-
-  // Features available without subscription
-  defaultFeatures: ["basic_export"],
-});
-
-// Fast - uses cache
-const entitlement = await billing.getEntitlement("user_123");
-
-// Simple feature checks
-if (await billing.hasFeature("user_123", "api_access")) {
-  // Allow API usage
-}
-
-// Get all features for a user
-const features = await billing.getFeatures("user_123");
-// ["basic_export", "api_access", "priority_support"]
-```
-
-### Caching
-
-The cache automatically invalidates when webhooks indicate state changes:
-
-```typescript
-// Webhook handler auto-invalidates cache
-app.post("/webhook", async (req, res) => {
-  const event = await billing.handleWebhook(req);
-  // Cache for event.customerRef is now invalidated
-  // Next getEntitlement() call fetches fresh data
-});
-```
-
-Use Redis for multi-server deployments:
-
-```typescript
-import { redisCache } from "@fuime/billing-sdk/cache/redis";
-import Redis from "ioredis";
-
-const billing = createEnhancedClient({
-  provider: stripe({ ... }),
-  cache: {
-    adapter: redisCache({ client: new Redis(process.env.REDIS_URL) }),
-    ttlMs: 60_000,
+    prod_pro: { features: ["exports", "api"], limits: { seats: 5 } },
   },
 });
-```
 
-### Feature Gating
-
-Define features per plan, check access simply:
-
-```typescript
-// Detailed check with reason
-const result = await billing.checkFeature("user_123", "api_access");
-// { allowed: true, reason: "plan_feature", productId: "prod_pro" }
-
-// Possible reasons:
-// - "plan_feature" - Feature is in their plan
-// - "default" - Using default features (no/inactive subscription)
-// - "no_subscription" - No subscription and not a default feature
-// - "unknown_plan" - Active subscription but plan not in config
-// - "feature_not_in_plan" - Active subscription but feature not included
-```
-
-Wildcard plans grant all defined features:
-
-```typescript
-plans: {
-  "prod_enterprise": { features: "*" }, // Gets everything
-}
-```
-
-## Capability Matrix
-
-Not all providers support all features. Check `capabilities` to know what's available:
-
-| Capability             | Mock | Stripe | Polar |
-| ---------------------- | ---- | ------ | ----- |
-| webhookVerification    | Yes  | Yes    | Yes   |
-| customerPortal         | Yes  | Yes    | Yes   |
-| merchantOfRecord       | No   | No     | Yes   |
-| usageBilling           | Yes  | Yes    | No    |
-| proration              | No   | No     | No    |
-| refunds                | Yes  | Yes    | Yes   |
-
-**Key distinction**: Polar is a Merchant of Record (MoR)—they handle tax collection and remittance. Stripe is not—you are the merchant and must handle tax yourself.
-
-```typescript
-if (billing.capabilities.merchantOfRecord) {
-  // Provider handles tax (Polar)
-} else {
-  // You handle tax (Stripe)
-}
-```
-
-## Providers
-
-### Stripe
-
-```typescript
-import { stripe } from "@fuime/billing-sdk/stripe";
-
-const provider = stripe({
-  apiKey: process.env.STRIPE_SECRET_KEY!,
-  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
+const checkout = await billing.createCheckout({
+  customerRef: authenticatedUser.id, // From server-verified authentication.
+  priceId: "price_pro_monthly", // From your server's allowed catalog.
+  successUrl: "https://your-app.com/billing/success",
+  cancelUrl: "https://your-app.com/pricing",
 });
 ```
+
+**Plan keys are Stripe product IDs (`prod_`); checkout takes price IDs (`price_`).** Multiple monthly/yearly prices for one product share the same feature definition.
+
+Without `resolveCustomerId`, the adapter searches subscription metadata. Stripe Search is eventually consistent, so a checkout or update may not appear immediately. A database-backed customer mapping switches reads to paginated subscription listing and reuses existing customers during checkout. The resolver is a trusted server-side identity mapping.
+
+Both subscription-level billing periods and newer item-level periods are supported. For a subscription with several items, the first item's product and billing period are used. The singular entitlement API prefers an accessible subscription, then the newest creation; it does not combine multiple subscriptions or add-ons.
 
 ### Polar
 
-```typescript
+```ts
 import { polar } from "@fuime/billing-sdk/polar";
 
 const provider = polar({
   accessToken: process.env.POLAR_ACCESS_TOKEN!,
   webhookSecret: process.env.POLAR_WEBHOOK_SECRET!,
-  sandbox: true, // Optional: use sandbox environment
+  sandbox: true,
 });
 ```
 
-### Mock (for testing)
+Polar's checkout `priceId` means a Polar **product ID**. The adapter sets external customer identity and protected subscription metadata, filters subscriptions on the server, and follows pagination. Existing subscriptions need `billing_sdk_customer_ref` metadata for lookup. API errors propagate; an outage is not returned as “no subscription.”
 
-```typescript
-import { mock } from "@fuime/billing-sdk/mock";
+Polar is the merchant of record. Inspect `billing.capabilities` for provider differences; use `billing.native<T>()` for operations outside the unified contract. A full Polar refund uses the order's remaining refundable amount when no amount is supplied.
 
-const provider = mock({
-  webhookSecret: "test_secret",
-});
+## Feature checks and route guards
 
-// Testing utilities
-provider._testing.createSubscription({
-  customerRef: "user_123",
-  productId: "prod_premium",
-  status: "active",
-});
-```
+| Method                                          | Result                                                     |
+| ----------------------------------------------- | ---------------------------------------------------------- |
+| `getEntitlement(userId)`                        | Provider entitlement or `null`                             |
+| `hasFeature(userId, feature)`                   | Boolean access decision                                    |
+| `checkFeature(userId, feature)`                 | Decision, reason, and product ID when available            |
+| `checkFeatures(userId, features)`               | Named decisions from one entitlement snapshot              |
+| `getFeatures(userId)`                           | Available feature names                                    |
+| `requireFeature(userId, feature)`               | Resolves on access; throws `FeatureAccessError` on denial  |
+| `checkLimit(userId, name, used, requested = 1)` | Quota decision and remaining capacity before the operation |
+| `invalidateCache(userId)`                       | Evicts that customer's cached entitlement                  |
+| `invalidateAllCache()`                          | Clears all entries in the configured cache adapter's scope |
+| `dispose()`                                     | Releases the client's internally owned memory cache        |
 
-## Core Concepts
+```ts
+import { FeatureAccessError } from "@fuime/billing-sdk";
 
-### Entitlements
-
-An `Entitlement` represents whether a user has access and why:
-
-```typescript
-interface Entitlement {
-  active: boolean;           // Can they access the thing RIGHT NOW?
-  status: EntitlementStatus; // trialing | active | canceled | past_due | expired
-  productId: string;
-  customerRef: string;
-  periodEnd: Date | null;
-  cancelAtPeriodEnd: boolean;
-  provider: string;
-}
-```
-
-The `active` field is derived from `status`:
-- `active` or `trialing` = `active: true`
-- `canceled` with time remaining = `active: true` (access until period end)
-- `past_due` or `expired` = `active: false`
-
-### Billing Events
-
-Webhooks are parsed into typed events:
-
-```typescript
-type BillingEvent =
-  | { type: "subscription.started"; entitlement: Entitlement }
-  | { type: "subscription.renewed"; entitlement: Entitlement }
-  | { type: "subscription.canceled"; entitlement: Entitlement }
-  | { type: "subscription.ended"; entitlement: Entitlement }
-  | { type: "payment.succeeded"; amount: number; currency: string }
-  | { type: "payment.failed"; amount: number; currency: string }
-  | { type: "refund.issued"; amount: number; currency: string }
-  | { type: "unmapped"; providerType: string; raw: unknown };
-```
-
-**Critical**: Unknown events become `unmapped`, never silently dropped.
-
-### canceled vs ended
-
-This distinction is essential:
-
-- **`subscription.canceled`**: User initiated cancellation, but **still has access** until `periodEnd`
-- **`subscription.ended`**: Access is **immediately terminated**
-
-```typescript
-const event = await billing.handleWebhook(req);
-
-if (event.type === "subscription.canceled") {
-  // User canceled, but entitlement.active might still be true
-  // Access continues until periodEnd
-  console.log("Access until:", event.entitlement.periodEnd);
-}
-
-if (event.type === "subscription.ended") {
-  // Access is gone NOW
-  // entitlement.active is false
-}
-```
-
-## Webhook Handling
-
-```typescript
-// Express/Node.js
-app.post("/webhooks/billing", async (req, res) => {
-  const event = await billing.handleWebhook({
-    body: req.body, // Raw body string (before JSON.parse)
-    headers: req.headers,
-    secret: process.env.WEBHOOK_SECRET!,
-  });
-
-  switch (event.type) {
-    case "subscription.started":
-      await db.users.update(event.customerRef, { plan: "premium" });
-      break;
-    case "subscription.ended":
-      await db.users.update(event.customerRef, { plan: "free" });
-      break;
-    case "unmapped":
-      console.log("Unhandled event:", event.providerType);
-      break;
+try {
+  await billing.requireFeature(authenticatedUser.id, "api");
+  // Perform the protected operation.
+} catch (error) {
+  if (error instanceof FeatureAccessError) {
+    // Translate to HTTP 403 or an upgrade prompt.
+    console.log(error.result.reason);
+  } else {
+    throw error; // Provider/cache failures are operational errors.
   }
+}
+```
 
-  res.sendStatus(200);
+Default features apply to customers without an active subscription. Known paid plans use their own feature list, so include free features explicitly if paid users should retain them. Unknown paid products receive defaults for backward compatibility; set `allowUnknownPlans: false` to deny them.
+
+`checkLimit` compares a usage snapshot supplied by your app. It does **not** meter, increment, reserve, or invoice usage. Store counters in your database and enforce concurrent changes in a transaction. Undefined quotas deny access, even on wildcard feature plans. Usage and requested amounts must be nonnegative safe integers; quota values are nonnegative integers or `"unlimited"`.
+
+## Caching
+
+```ts
+const billing = createEnhancedClient({
+  provider,
+  cache: {
+    ttlMs: 60_000,
+    nullTtlMs: 10_000,
+    cacheNulls: true,
+    namespace: "my-app:production:stripe-account-1",
+  },
 });
 ```
 
-## Creating Checkouts
+Defaults are a bounded memory cache, one-minute entitlement TTL, and ten-second negative TTL. Set `cache: false` to bypass storage. Concurrent requests to the same customer share an in-flight read even with storage disabled. Zero TTL disables storage for that result; invalid TTLs fail at construction.
 
-```typescript
-const checkout = await billing.createCheckout({
-  customerRef: "user_123",     // Your user ID
-  priceId: "price_premium",    // Provider's price/product ID
-  successUrl: "https://...",
-  cancelUrl: "https://...",
-  email: "user@example.com",   // Optional
+Cached values are copied to prevent accidental mutation. Active cache entries are capped at the known paid-period boundary, forcing a provider refresh at that point. A canceled subscription cannot retain access beyond its known period end.
+
+Memory cache supports LRU eviction, `getStats`, `resetStats`, and `dispose`. A custom cache remains owned by the caller and is not disposed by the billing client. Use separate cache instances or Redis prefixes if `invalidateAllCache` must be isolated between applications/accounts; key namespaces alone do not narrow a full adapter clear.
+
+### Redis
+
+```ts
+import Redis from "ioredis";
+import { redisCache } from "@fuime/billing-sdk/cache/redis";
+
+const redis = new Redis(process.env.REDIS_URL!);
+const cache = redisCache({
+  client: redis,
+  prefix: "my-app:prod:stripe-account-1:",
 });
-
-// Redirect user to checkout.url
+const billing = createEnhancedClient({ provider, cache: { adapter: cache } });
 ```
 
-The `customerRef` is stored in the subscription metadata and returned in webhook events.
+Redis values restore `periodEnd` as a `Date`. Malformed stored data is a miss; Redis connection failures propagate. Bulk invalidation uses paginated `SCAN` and bounded `DEL`, not blocking `KEYS`.
 
-## Customer Portal
+The adapter accepts ioredis-style commands. For node-redis, bridge its command shapes explicitly:
 
-```typescript
-const session = await billing.createPortalSession(
-  "user_123",
-  "https://example.com/account"
-);
-
-// Redirect user to session.url
+```ts
+const cache = redisCache({
+  prefix: "my-app:prod:",
+  client: {
+    get: (key) => redis.get(key),
+    set: (key, value, _mode, ttl) => redis.set(key, value, { PX: ttl }),
+    del: (...keys) => redis.del(keys),
+    scan: async (cursor, _match, pattern, _count, count) => {
+      const page = await redis.scan(cursor, { MATCH: pattern, COUNT: count });
+      return [String(page.cursor), page.keys];
+    },
+  },
+});
 ```
 
-## Native SDK Access
+Match the cursor type required by your installed node-redis major version (older versions use a numeric cursor).
 
-For provider-specific features not in the unified interface:
+**Consistency boundary:** invalidation prevents older reads/writes from restoring stale state within one client instance. Redis shares cache storage and invalidations between servers, but this SDK does not implement a distributed generation check or lock. An in-flight read on another server may repopulate old state until TTL. Use short TTLs, no cache for strict checks, or a transactionally maintained entitlement store where stronger guarantees are required. Cache mutations are serialized within a client.
 
-```typescript
-import Stripe from "stripe";
+### Custom adapters
 
-// Type-safe native access
-const stripeClient = billing.native<Stripe>();
+Existing adapters can keep implementing `get`, `set`, `invalidate`, and `invalidateAll`. To support negative caching, also implement:
 
-// Use any Stripe API
-const invoice = await stripeClient.invoices.retrieve("inv_...");
+```ts
+lookup(customerRef: string): Promise<
+  | { hit: false }
+  | { hit: true; value: Entitlement | null }
+>;
 ```
 
-## CLI Doctor
+Legacy `get()` cannot distinguish cached `null` from a miss, so negative caching is unavailable for adapters without `lookup`. Built-in adapters implement it.
 
-Check your provider configuration:
+## Webhooks
+
+Always pass the raw body. Do not parse and reserialize before verification.
+
+```ts
+const event = await billing.handleWebhook({
+  body: await request.text(),
+  headers: Object.fromEntries(request.headers),
+  secret: process.env.BILLING_WEBHOOK_SECRET!,
+});
+```
+
+The per-request `secret` is authoritative; it must match the configured endpoint secret. Header names are case-insensitive. Invalid signatures throw `WebhookVerificationError`. Verified but malformed Polar payloads throw parsing/validation errors separately.
+
+Every verified event with a known customer reference invalidates that customer's cache, including payment failures and unmapped subscription updates. Events without attribution cannot invalidate a specific customer.
+
+| Normalized event                       | Meaning                                                                   |
+| -------------------------------------- | ------------------------------------------------------------------------- |
+| `subscription.started`                 | Subscription created; inspect `entitlement.active` before granting access |
+| `subscription.renewed`                 | Recognized billing-period renewal                                         |
+| `subscription.canceled`                | Cancellation scheduled; access can continue through the paid period       |
+| `subscription.ended`                   | Subscription ended; access revoked                                        |
+| `payment.succeeded` / `payment.failed` | Payment outcome, amount in minor currency units                           |
+| `refund.issued`                        | Provider refund notification                                              |
+| `unmapped`                             | Verified event outside this set; original data and provider type retained |
+
+Stripe event IDs and Polar `webhook-id` values remain stable across retries. Persist `(provider, event.id)` with your business changes in a database transaction before sending emails or performing other non-idempotent side effects. The SDK does not deduplicate your application handlers or order provider deliveries. Refund notifications from Stripe charges and Polar orders report cumulative refunded amounts, not necessarily a new refund delta.
+
+## Example and development
+
+See [the Next.js App Router example](examples/nextjs-app-router/README.md) for server-authenticated checkout, form/JSON handling, raw webhooks, and product-based feature gates.
 
 ```bash
-npx @fuime/billing-sdk doctor
+pnpm install --frozen-lockfile
+pnpm check                       # Types, tests, build, package smoke checks
+pnpm --filter billing-sdk-nextjs-example build
+pnpm exec billing-sdk doctor --provider stripe
 ```
 
-Output:
-```
-billing-sdk doctor
+Provider tests use signed fixtures and mocked API boundaries; they do not charge real accounts. Test a checkout, renewal, failed payment, cancellation, portal, and refund in provider sandbox accounts before release. The mock adapter is for development/testing only.
 
-Checking provider health...
+For the thin provider wrapper without feature gates, use `createBillingClient({ provider })`. Adapter authors can use the exported `@fuime/billing-sdk/conformance` Vitest harness.
 
-✓ STRIPE
-  Credentials valid, API reachable
-  Mode: test
-  Enabled: webhookVerification, customerPortal, usageBilling, refunds
-  Disabled: merchantOfRecord, proration
+See [CHANGELOG.md](CHANGELOG.md) for migration notes and [CONTRIBUTING.md](CONTRIBUTING.md) for contributions.
 
-✓ POLAR
-  Credentials valid, API reachable
-  Mode: sandbox
-  Enabled: webhookVerification, customerPortal, merchantOfRecord, refunds
-  Disabled: usageBilling, proration
+## Provider references
 
-Capability Matrix:
-────────────────────────────────────────────────────────────────
-Capability                stripe     polar
-────────────────────────────────────────────────────────────────
-webhookVerification       ✓          ✓
-customerPortal            ✓          ✓
-merchantOfRecord          –          ✓
-usageBilling              ✓          –
-proration                 –          –
-refunds                   ✓          ✓
-
-All checks passed!
-```
-
-## Conformance Testing
-
-Test your adapter against the standard contract:
-
-```typescript
-import { describe } from "vitest";
-import { runConformanceSuite } from "@fuime/billing-sdk/conformance";
-import { createMockHarness } from "@fuime/billing-sdk/conformance/mock-harness";
-
-describe("my adapter", () => {
-  runConformanceSuite(myProvider, createMockHarness(myProvider));
-});
-```
-
-## Design Principles
-
-1. **Never silently drop events** - Unknown webhook events become `unmapped`, not ignored
-2. **canceled ≠ ended** - These are distinct states with different access implications
-3. **Capabilities are truthful** - If a provider can't do something, `capabilities` reflects that
-4. **No provider logic leaks** - All provider-specific code stays in adapters
-5. **Type safety** - Full TypeScript support with discriminated unions
-
-## Out of Scope (v1)
-
-- Proration calculations
-- Usage-based billing metering
-- Tax configuration
-- Product/price catalog management
-
-These require too much provider-specific logic to abstract cleanly.
+- [Stripe subscription item billing periods](https://docs.stripe.com/changelog/basil/2025-03-31/deprecate-subscription-current-period-start-and-end)
+- [Stripe Search limitations](https://docs.stripe.com/search#limitations)
+- [Polar subscription filtering](https://polar.sh/docs/api-reference/subscriptions/list)
+- [Polar customer identity](https://polar.sh/docs/features/customer-management)
 
 ## License
 
-MIT
+MIT (see package metadata).

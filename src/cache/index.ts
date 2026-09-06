@@ -7,10 +7,15 @@
 
 export type {
   CacheAdapter,
+  CacheLookup,
   CacheAdapterWithStats,
   CacheOptions,
   CacheStats,
 } from "./types.js";
 
 export { memoryCache, type MemoryCacheOptions } from "./memory.js";
-export { redisCache, type RedisCacheOptions, type RedisClient } from "./redis.js";
+export {
+  redisCache,
+  type RedisCacheOptions,
+  type RedisClient,
+} from "./redis.js";
