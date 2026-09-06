@@ -298,8 +298,8 @@ export interface PolarProvider extends BillingProvider {
  *
  * @example
  * ```ts
- * import { polar } from "@opencoredev/billing-sdk/polar";
- * import { createBillingClient } from "@opencoredev/billing-sdk";
+ * import { polar } from "@fuime/billing-sdk/polar";
+ * import { createBillingClient } from "@fuime/billing-sdk";
  *
  * const client = createBillingClient({
  *   provider: polar({

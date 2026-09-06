@@ -34,7 +34,7 @@ export interface MemoryCacheOptions {
  *
  * @example
  * ```ts
- * import { memoryCache } from "@opencoredev/billing-sdk/cache/memory";
+ * import { memoryCache } from "@fuime/billing-sdk/cache/memory";
  *
  * const cache = memoryCache({ maxSize: 5000 });
  * ```

@@ -1,5 +1,5 @@
 /**
- * @opencoredev/billing-sdk
+ * @fuime/billing-sdk
  *
  * The interface, written before any provider exists.
  *

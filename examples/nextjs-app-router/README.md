@@ -1,6 +1,6 @@
 # Next.js + Billing SDK Example
 
-A complete example showing how to use `@opencoredev/billing-sdk` with Next.js App Router.
+A complete example showing how to use `@fuime/billing-sdk` with Next.js App Router.
 
 ## Features Demonstrated
 
@@ -74,8 +74,8 @@ Open [http://localhost:3000](http://localhost:3000).
 ### `lib/billing.ts` - Client Setup
 
 ```typescript
-import { createEnhancedClient } from "@opencoredev/billing-sdk";
-import { stripe } from "@opencoredev/billing-sdk/stripe";
+import { createEnhancedClient } from "@fuime/billing-sdk";
+import { stripe } from "@fuime/billing-sdk/stripe";
 
 export const billing = createEnhancedClient({
   provider: stripe({
@@ -139,7 +139,7 @@ switch (event.type) {
 ### 1. Use Redis for caching (multi-server)
 
 ```typescript
-import { redisCache } from "@opencoredev/billing-sdk/cache/redis";
+import { redisCache } from "@fuime/billing-sdk/cache/redis";
 import Redis from "ioredis";
 
 const billing = createEnhancedClient({
@@ -170,7 +170,7 @@ Select these events:
 
 Run the billing doctor:
 ```bash
-npx @opencoredev/billing-sdk doctor
+npx @fuime/billing-sdk doctor
 ```
 
 ## License

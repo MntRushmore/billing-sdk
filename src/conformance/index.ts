@@ -69,8 +69,8 @@ export interface ConformanceTestHarness {
  * @example
  * ```ts
  * import { describe } from "vitest";
- * import { runConformanceSuite } from "@opencoredev/billing-sdk/conformance";
- * import { mock } from "@opencoredev/billing-sdk/mock";
+ * import { runConformanceSuite } from "@fuime/billing-sdk/conformance";
+ * import { mock } from "@fuime/billing-sdk/mock";
  *
  * describe("mock adapter conformance", () => {
  *   const provider = mock();

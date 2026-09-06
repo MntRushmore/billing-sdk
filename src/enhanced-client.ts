@@ -117,8 +117,8 @@ const DEFAULT_NULL_TTL_MS = 10_000; // 10 seconds for "no subscription" results
  *
  * @example
  * ```ts
- * import { createEnhancedClient } from "@opencoredev/billing-sdk";
- * import { stripe } from "@opencoredev/billing-sdk/stripe";
+ * import { createEnhancedClient } from "@fuime/billing-sdk";
+ * import { stripe } from "@fuime/billing-sdk/stripe";
  *
  * const billing = createEnhancedClient({
  *   provider: stripe({ ... }),

@@ -8,7 +8,7 @@
  * - Reports capability summary
  *
  * Usage:
- *   npx @opencoredev/billing-sdk doctor [--provider stripe|polar]
+ *   npx @fuime/billing-sdk doctor [--provider stripe|polar]
  */
 
 import { stripe } from "../adapters/stripe.js";
@@ -260,7 +260,7 @@ ${colorize("billing-sdk doctor", "bold")}
 Run health checks on your billing providers.
 
 ${colorize("Usage:", "cyan")}
-  npx @opencoredev/billing-sdk doctor [options]
+  npx @fuime/billing-sdk doctor [options]
 
 ${colorize("Options:", "cyan")}
   --provider <name>   Check only this provider (stripe, polar)

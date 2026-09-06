@@ -1,17 +1,17 @@
 /**
  * Billing client setup for the application.
  *
- * This file shows how to configure @opencoredev/billing-sdk with:
+ * This file shows how to configure @fuime/billing-sdk with:
  * - Stripe as the provider
  * - Entitlement caching (1 minute TTL)
  * - Feature gating per plan
  */
 
-import { createEnhancedClient } from "@opencoredev/billing-sdk";
-import { stripe } from "@opencoredev/billing-sdk/stripe";
+import { createEnhancedClient } from "@fuime/billing-sdk";
+import { stripe } from "@fuime/billing-sdk/stripe";
 
 // For production with multiple servers, use Redis:
-// import { redisCache } from "@opencoredev/billing-sdk/cache/redis";
+// import { redisCache } from "@fuime/billing-sdk/cache/redis";
 // import Redis from "ioredis";
 
 /**

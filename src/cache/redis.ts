@@ -39,7 +39,7 @@ export interface RedisCacheOptions {
  *
  * @example
  * ```ts
- * import { redisCache } from "@opencoredev/billing-sdk/cache/redis";
+ * import { redisCache } from "@fuime/billing-sdk/cache/redis";
  * import Redis from "ioredis";
  *
  * const redis = new Redis(process.env.REDIS_URL);
@@ -50,7 +50,7 @@ export interface RedisCacheOptions {
  * ```ts
  * // With node-redis
  * import { createClient } from "redis";
- * import { redisCache } from "@opencoredev/billing-sdk/cache/redis";
+ * import { redisCache } from "@fuime/billing-sdk/cache/redis";
  *
  * const redis = createClient({ url: process.env.REDIS_URL });
  * await redis.connect();

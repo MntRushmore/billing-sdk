@@ -1,4 +1,4 @@
-# @opencoredev/billing-sdk
+# @fuime/billing-sdk
 
 Typed billing interface across payment providers. Answers the question: **"can this user access the thing right now?"**
 
@@ -7,7 +7,7 @@ This SDK models subscription state and entitlements—not checkout wrappers. It 
 ## Installation
 
 ```bash
-pnpm add @opencoredev/billing-sdk
+pnpm add @fuime/billing-sdk
 ```
 
 For specific providers, also install their SDKs:
@@ -23,8 +23,8 @@ pnpm add stripe
 ## Quick Start
 
 ```typescript
-import { createBillingClient } from "@opencoredev/billing-sdk";
-import { stripe } from "@opencoredev/billing-sdk/stripe";
+import { createBillingClient } from "@fuime/billing-sdk";
+import { stripe } from "@fuime/billing-sdk/stripe";
 
 const billing = createBillingClient({
   provider: stripe({
@@ -47,8 +47,8 @@ For most apps, use `createEnhancedClient` instead of `createBillingClient`. It a
 - **Feature gating** - Define what each plan can access
 
 ```typescript
-import { createEnhancedClient } from "@opencoredev/billing-sdk";
-import { stripe } from "@opencoredev/billing-sdk/stripe";
+import { createEnhancedClient } from "@fuime/billing-sdk";
+import { stripe } from "@fuime/billing-sdk/stripe";
 
 const billing = createEnhancedClient({
   provider: stripe({
@@ -99,7 +99,7 @@ app.post("/webhook", async (req, res) => {
 Use Redis for multi-server deployments:
 
 ```typescript
-import { redisCache } from "@opencoredev/billing-sdk/cache/redis";
+import { redisCache } from "@fuime/billing-sdk/cache/redis";
 import Redis from "ioredis";
 
 const billing = createEnhancedClient({
@@ -164,7 +164,7 @@ if (billing.capabilities.merchantOfRecord) {
 ### Stripe
 
 ```typescript
-import { stripe } from "@opencoredev/billing-sdk/stripe";
+import { stripe } from "@fuime/billing-sdk/stripe";
 
 const provider = stripe({
   apiKey: process.env.STRIPE_SECRET_KEY!,
@@ -175,7 +175,7 @@ const provider = stripe({
 ### Polar
 
 ```typescript
-import { polar } from "@opencoredev/billing-sdk/polar";
+import { polar } from "@fuime/billing-sdk/polar";
 
 const provider = polar({
   accessToken: process.env.POLAR_ACCESS_TOKEN!,
@@ -187,7 +187,7 @@ const provider = polar({
 ### Mock (for testing)
 
 ```typescript
-import { mock } from "@opencoredev/billing-sdk/mock";
+import { mock } from "@fuime/billing-sdk/mock";
 
 const provider = mock({
   webhookSecret: "test_secret",
@@ -337,7 +337,7 @@ const invoice = await stripeClient.invoices.retrieve("inv_...");
 Check your provider configuration:
 
 ```bash
-npx @opencoredev/billing-sdk doctor
+npx @fuime/billing-sdk doctor
 ```
 
 Output:
@@ -378,8 +378,8 @@ Test your adapter against the standard contract:
 
 ```typescript
 import { describe } from "vitest";
-import { runConformanceSuite } from "@opencoredev/billing-sdk/conformance";
-import { createMockHarness } from "@opencoredev/billing-sdk/conformance/mock-harness";
+import { runConformanceSuite } from "@fuime/billing-sdk/conformance";
+import { createMockHarness } from "@fuime/billing-sdk/conformance/mock-harness";
 
 describe("my adapter", () => {
   runConformanceSuite(myProvider, createMockHarness(myProvider));

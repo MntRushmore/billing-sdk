@@ -1,5 +1,5 @@
 {
-  "name": "@opencoredev/billing-sdk",
+  "name": "@fuime/billing-sdk",
   "version": "0.1.0",
   "description": "Typed billing interface across payment providers. Answers 'can this user access the thing right now?'",
   "type": "module",

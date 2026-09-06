@@ -326,8 +326,8 @@ export interface StripeProvider extends BillingProvider {
  *
  * @example
  * ```ts
- * import { stripe } from "@opencoredev/billing-sdk/stripe";
- * import { createBillingClient } from "@opencoredev/billing-sdk";
+ * import { stripe } from "@fuime/billing-sdk/stripe";
+ * import { createBillingClient } from "@fuime/billing-sdk";
  *
  * const client = createBillingClient({
  *   provider: stripe({
