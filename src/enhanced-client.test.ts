@@ -79,7 +79,6 @@ describe("createEnhancedClient", () => {
       const webhookReq = await provider._testing.createWebhookRequest({
         type: "subscription.canceled",
         subscriptionId: sub.id,
-        customerRef: "user_123",
       });
 
       await client.handleWebhook(webhookReq);
