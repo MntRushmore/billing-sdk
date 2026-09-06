@@ -1,0 +1,27 @@
+# Source files (only dist is published)
+src/
+examples/
+.github/
+
+# Config files
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+pnpm-workspace.yaml
+pnpm-lock.yaml
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+.env*

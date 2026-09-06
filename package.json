@@ -1,0 +1,124 @@
+{
+  "name": "@opencoredev/billing-sdk",
+  "version": "0.1.0",
+  "description": "Typed billing interface across payment providers. Answers 'can this user access the thing right now?'",
+  "type": "module",
+  "license": "MIT",
+  "author": "OpenCore Dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/opencoredev/billing-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/opencoredev/billing-sdk/issues"
+  },
+  "homepage": "https://github.com/opencoredev/billing-sdk#readme",
+  "keywords": [
+    "billing",
+    "stripe",
+    "polar",
+    "subscription",
+    "entitlement",
+    "payment",
+    "saas",
+    "feature-flags",
+    "access-control",
+    "typescript"
+  ],
+  "bin": {
+    "billing-sdk": "./dist/cli/doctor.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./mock": {
+      "types": "./dist/mock.d.ts",
+      "import": "./dist/mock.js",
+      "require": "./dist/mock.cjs"
+    },
+    "./stripe": {
+      "types": "./dist/stripe.d.ts",
+      "import": "./dist/stripe.js",
+      "require": "./dist/stripe.cjs"
+    },
+    "./polar": {
+      "types": "./dist/polar.d.ts",
+      "import": "./dist/polar.js",
+      "require": "./dist/polar.cjs"
+    },
+    "./conformance": {
+      "types": "./dist/conformance.d.ts",
+      "import": "./dist/conformance.js",
+      "require": "./dist/conformance.cjs"
+    },
+    "./conformance/mock-harness": {
+      "types": "./dist/conformance/mock-harness.d.ts",
+      "import": "./dist/conformance/mock-harness.js",
+      "require": "./dist/conformance/mock-harness.cjs"
+    },
+    "./conformance/stripe-harness": {
+      "types": "./dist/conformance/stripe-harness.d.ts",
+      "import": "./dist/conformance/stripe-harness.js",
+      "require": "./dist/conformance/stripe-harness.cjs"
+    },
+    "./cache": {
+      "types": "./dist/cache.d.ts",
+      "import": "./dist/cache.js",
+      "require": "./dist/cache.cjs"
+    },
+    "./cache/memory": {
+      "types": "./dist/cache/memory.d.ts",
+      "import": "./dist/cache/memory.js",
+      "require": "./dist/cache/memory.cjs"
+    },
+    "./cache/redis": {
+      "types": "./dist/cache/redis.d.ts",
+      "import": "./dist/cache/redis.js",
+      "require": "./dist/cache/redis.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.24.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@11.24.0",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "~5.7.0",
+    "vitest": "^4.1.11"
+  },
+  "peerDependencies": {
+    "stripe": ">=14.0.0",
+    "vitest": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "stripe": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@polar-sh/sdk": "^0.49.0"
+  }
+}
