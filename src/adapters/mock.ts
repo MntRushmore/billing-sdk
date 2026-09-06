@@ -119,7 +119,7 @@ function subscriptionToEntitlement(
   sub: MockSubscription
 ): Entitlement {
   const now = new Date();
-  const isPastPeriodEnd = sub.periodEnd < now;
+  const isPastPeriodEnd = sub.periodEnd <= now;
 
   // Derive `active` from status and period
   // active = true when user should have access
@@ -176,7 +176,7 @@ export function mock(options: MockProviderOptions = {}): MockProvider {
 
     async handleWebhook(req: WebhookRequest): Promise<BillingEvent> {
       // Verify signature before parsing
-      const providedSignature = req.headers["x-mock-signature"];
+      const providedSignature = Object.entries(req.headers).find(([name]) => name.toLowerCase() === "x-mock-signature")?.[1];
       if (!providedSignature) {
         throw new WebhookVerificationError("Missing signature header");
       }
@@ -432,6 +432,7 @@ export function mock(options: MockProviderOptions = {}): MockProvider {
 
         sub.periodEnd = newPeriodEnd;
         sub.status = "active";
+        sub.cancelAtPeriodEnd = false;
         return sub;
       },
 

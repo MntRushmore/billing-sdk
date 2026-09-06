@@ -1,136 +1,87 @@
-/**
- * In-memory cache adapter for billing-sdk
- *
- * Simple Map-based cache with TTL support.
- * Good for single-server deployments or development.
- * For multi-server deployments, use Redis adapter.
- */
-
 import type { Entitlement } from "../types.js";
-import type { CacheAdapterWithStats, CacheStats } from "./types.js";
-
-interface CacheEntry {
-  entitlement: Entitlement | null;
-  expiresAt: number;
-}
+import type {
+  CacheAdapterWithStats,
+  CacheLookup,
+  CacheStats,
+} from "./types.js";
 
 export interface MemoryCacheOptions {
-  /**
-   * Maximum number of entries to store.
-   * When exceeded, oldest entries are evicted.
-   * Default: 10000
-   */
+  /** Maximum entries, evicted in least-recently-used order. Default: 10000. */
   maxSize?: number;
-
-  /**
-   * How often to run cleanup of expired entries (ms).
-   * Default: 60000 (1 minute)
-   */
+  /** Cleanup interval in milliseconds. Set 0 to disable. Default: 60000. */
   cleanupIntervalMs?: number;
 }
 
-/**
- * Creates an in-memory cache adapter.
- *
- * @example
- * ```ts
- * import { memoryCache } from "@fuime/billing-sdk/cache/memory";
- *
- * const cache = memoryCache({ maxSize: 5000 });
- * ```
- */
-export function memoryCache(options: MemoryCacheOptions = {}): CacheAdapterWithStats {
+export function memoryCache(
+  options: MemoryCacheOptions = {},
+): CacheAdapterWithStats {
   const maxSize = options.maxSize ?? 10000;
-  const cleanupIntervalMs = options.cleanupIntervalMs ?? 60000;
+  const interval = options.cleanupIntervalMs ?? 60000;
+  if (!Number.isSafeInteger(maxSize) || maxSize < 1)
+    throw new RangeError("maxSize must be a positive integer");
+  if (!Number.isFinite(interval) || interval < 0)
+    throw new RangeError("cleanupIntervalMs must be nonnegative and finite");
+  const entries = new Map<
+    string,
+    { entitlement: Entitlement | null; expiresAt: number }
+  >();
+  let stats = { hits: 0, misses: 0, invalidations: 0 };
+  const timer =
+    interval > 0
+      ? setInterval(() => {
+          for (const [key, entry] of entries) {
+            if (entry.expiresAt <= Date.now()) entries.delete(key);
+          }
+        }, interval)
+      : undefined;
+  timer?.unref?.();
 
-  const cache = new Map<string, CacheEntry>();
-  let stats: CacheStats = { hits: 0, misses: 0, invalidations: 0, size: 0 };
-
-  // Periodic cleanup of expired entries
-  let cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-  function startCleanup(): void {
-    if (cleanupTimer) return;
-    cleanupTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [key, entry] of cache) {
-        if (entry.expiresAt <= now) {
-          cache.delete(key);
-        }
-      }
-      stats.size = cache.size;
-    }, cleanupIntervalMs);
-
-    // Don't keep process alive just for cleanup
-    if (cleanupTimer.unref) {
-      cleanupTimer.unref();
+  async function lookup(customerRef: string): Promise<CacheLookup> {
+    const entry = entries.get(customerRef);
+    if (!entry || entry.expiresAt <= Date.now()) {
+      entries.delete(customerRef);
+      stats.misses++;
+      return { hit: false };
     }
+    entries.delete(customerRef);
+    entries.set(customerRef, entry);
+    stats.hits++;
+    return { hit: true, value: structuredClone(entry.entitlement) };
   }
-
-  function evictOldest(): void {
-    // Simple LRU-ish: delete first entry (oldest insertion)
-    const firstKey = cache.keys().next().value;
-    if (firstKey !== undefined) {
-      cache.delete(firstKey);
-    }
-  }
-
-  startCleanup();
 
   return {
-    async get(customerRef: string): Promise<Entitlement | null> {
-      const entry = cache.get(customerRef);
-
-      if (!entry) {
-        stats.misses++;
-        return null;
-      }
-
-      if (entry.expiresAt <= Date.now()) {
-        cache.delete(customerRef);
-        stats.misses++;
-        stats.size = cache.size;
-        return null;
-      }
-
-      stats.hits++;
-      return entry.entitlement;
+    lookup,
+    async get(customerRef) {
+      const result = await lookup(customerRef);
+      return result.hit ? result.value : null;
     },
-
-    async set(customerRef: string, entitlement: Entitlement | null, ttlMs: number): Promise<void> {
-      // Evict if at capacity
-      if (cache.size >= maxSize && !cache.has(customerRef)) {
-        evictOldest();
-      }
-
-      cache.set(customerRef, {
-        entitlement,
+    async set(customerRef, entitlement, ttlMs) {
+      if (!Number.isFinite(ttlMs) || ttlMs < 0)
+        throw new RangeError("ttlMs must be nonnegative and finite");
+      entries.delete(customerRef);
+      if (ttlMs === 0) return;
+      if (entries.size >= maxSize) entries.delete(entries.keys().next().value!);
+      entries.set(customerRef, {
+        entitlement: structuredClone(entitlement),
         expiresAt: Date.now() + ttlMs,
       });
-      stats.size = cache.size;
     },
-
-    async invalidate(customerRef: string): Promise<void> {
-      const deleted = cache.delete(customerRef);
-      if (deleted) {
-        stats.invalidations++;
-        stats.size = cache.size;
-      }
+    async invalidate(customerRef) {
+      if (entries.delete(customerRef)) stats.invalidations++;
     },
-
-    async invalidateAll(): Promise<void> {
-      const count = cache.size;
-      cache.clear();
-      stats.invalidations += count;
-      stats.size = 0;
+    async invalidateAll() {
+      stats.invalidations += entries.size;
+      entries.clear();
     },
-
     getStats(): CacheStats {
-      return { ...stats };
+      return { ...stats, size: entries.size };
     },
-
-    resetStats(): void {
-      stats = { hits: 0, misses: 0, invalidations: 0, size: cache.size };
+    resetStats() {
+      stats = { hits: 0, misses: 0, invalidations: 0 };
+    },
+    dispose() {
+      clearInterval(timer);
+      entries.clear();
     },
   };
 }

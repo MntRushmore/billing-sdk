@@ -1,303 +1,307 @@
-/**
- * Polar adapter unit tests.
- *
- * These tests verify the Polar adapter's webhook handling and status mapping
- * without hitting the real Polar API.
- */
-
-import { describe, it, expect, beforeEach } from "vitest";
-import { Polar } from "@polar-sh/sdk";
-import { polar, type PolarProvider } from "./polar.js";
-import { WebhookVerificationError } from "../types.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { createHmac } from "node:crypto";
+import { polar } from "./polar.js";
+import { WebhookVerificationError } from "../types.js";
 
-// Test webhook secret
-const TEST_WEBHOOK_SECRET = "whsec_polar_test_secret";
-const TEST_ACCESS_TOKEN = "polar_test_access_token";
-
-// Helper to generate Standard Webhooks signed payloads
-function createSignedWebhookPayload(
-  payload: object,
-  secret: string
-): { body: string; headers: Record<string, string> } {
-  const body = JSON.stringify(payload);
-  const webhookId = `msg_${Date.now()}`;
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-
-  // Standard Webhooks signature: base64(hmac-sha256(webhook-id.timestamp.body))
-  // The secret needs to be base64 decoded first in Standard Webhooks
-  const signedPayload = `${webhookId}.${timestamp}.${body}`;
-
-  // For testing, we'll use the secret directly (in real Standard Webhooks, secret is base64)
-  // The Polar SDK handles this internally
-  const signature = createHmac("sha256", secret)
-    .update(signedPayload)
-    .digest("base64");
-
+const secret = "polar-test-secret";
+const makeProvider = () =>
+  polar({ accessToken: "test", webhookSecret: secret, sandbox: true });
+const rawSub = (overrides: Record<string, unknown> = {}) => ({
+  status: "active",
+  cancel_at_period_end: false,
+  current_period_end: new Date(Date.now() + 60_000).toISOString(),
+  product_id: "prod_pro",
+  customer_id: "cus_1",
+  metadata: { billing_sdk_customer_ref: "user_1" },
+  ...overrides,
+});
+const sdkSub = (overrides: Record<string, unknown> = {}) => ({
+  id: "sub_1",
+  status: "active",
+  cancelAtPeriodEnd: false,
+  currentPeriodEnd: new Date(Date.now() + 60_000),
+  createdAt: new Date(),
+  productId: "prod_pro",
+  customerId: "cus_1",
+  metadata: { billing_sdk_customer_ref: "user_1" },
+  ...overrides,
+});
+function signed(
+  type: string,
+  data: unknown = {},
+  timestamp = new Date().toISOString(),
+) {
+  const body = JSON.stringify({ type, data, timestamp });
+  const time = String(Math.floor(Date.now() / 1000));
   return {
     body,
+    secret,
     headers: {
-      "webhook-id": webhookId,
-      "webhook-timestamp": timestamp,
-      "webhook-signature": `v1,${signature}`,
+      "webhook-id": "msg_stable",
+      "webhook-timestamp": time,
+      "webhook-signature": `v1,${createHmac("sha256", secret).update(`msg_stable.${time}.${body}`).digest("base64")}`,
     },
   };
 }
-
-// Helper to create a mock Polar subscription object
-function createMockSubscription(
-  overrides: Partial<{
-    id: string;
-    status: string;
-    cancel_at_period_end: boolean;
-    current_period_end: string;
-    product_id: string;
-    customer_id: string;
-    metadata: Record<string, string>;
-  }> = {}
-): object {
-  const now = new Date();
-  const periodEnd = new Date(now);
-  periodEnd.setMonth(periodEnd.getMonth() + 1);
-
-  return {
-    id: overrides.id ?? "sub_polar_test123",
-    status: overrides.status ?? "active",
-    cancel_at_period_end: overrides.cancel_at_period_end ?? false,
-    current_period_start: now.toISOString(),
-    current_period_end: overrides.current_period_end ?? periodEnd.toISOString(),
-    product_id: overrides.product_id ?? "prod_polar_test123",
-    customer_id: overrides.customer_id ?? "cus_polar_test123",
-    metadata: overrides.metadata ?? { billing_sdk_customer_ref: "user_123" },
-  };
+function mockPages(
+  provider: ReturnType<typeof makeProvider>,
+  pages: Record<string, unknown>[][],
+) {
+  return vi.spyOn(provider.native.subscriptions, "list").mockResolvedValue({
+    async *[Symbol.asyncIterator]() {
+      for (const items of pages) yield { result: { items } };
+    },
+  } as never);
 }
+afterEach(() => vi.restoreAllMocks());
 
-// Helper to create a mock Polar webhook event
-function createMockEvent(type: string, data: object): object {
-  return {
-    type,
-    data,
-  };
-}
-
-describe("polar adapter", () => {
-  let provider: PolarProvider;
-
-  beforeEach(() => {
-    provider = polar({
-      accessToken: TEST_ACCESS_TOKEN,
-      webhookSecret: TEST_WEBHOOK_SECRET,
-      sandbox: true,
-    });
-  });
-
-  describe("provider basics", () => {
-    it("has correct name", () => {
-      expect(provider.name).toBe("polar");
-    });
-
-    it("reports capabilities truthfully", () => {
-      expect(provider.capabilities).toEqual({
-        webhookVerification: true,
-        customerPortal: true,
-        merchantOfRecord: true, // Polar IS MoR - key difference from Stripe
-        usageBilling: false,
-        proration: false,
-        refunds: true,
-      });
-    });
-
-    it("merchantOfRecord is true (unlike Stripe)", () => {
-      // This is the key capability difference between Stripe and Polar
-      expect(provider.capabilities.merchantOfRecord).toBe(true);
-    });
-
-    it("exposes native Polar client", () => {
-      expect(provider.native).toBeInstanceOf(Polar);
-    });
-  });
-
-  describe("webhook signature verification", () => {
-    it("throws WebhookVerificationError on missing signature headers", async () => {
-      await expect(
-        provider.handleWebhook({
-          body: JSON.stringify({ type: "test" }),
-          headers: {},
-          secret: TEST_WEBHOOK_SECRET,
-        })
-      ).rejects.toThrow(WebhookVerificationError);
-    });
-
-    it("throws WebhookVerificationError on invalid signature", async () => {
-      await expect(
-        provider.handleWebhook({
-          body: JSON.stringify({ type: "test" }),
-          headers: {
-            "webhook-id": "msg_123",
-            "webhook-timestamp": "1234567890",
-            "webhook-signature": "v1,invalid_signature",
-          },
-          secret: TEST_WEBHOOK_SECRET,
-        })
-      ).rejects.toThrow(WebhookVerificationError);
-    });
-  });
-
-  describe("subscription.created webhook", () => {
-    it("maps to subscription.started event", async () => {
-      const sub = createMockSubscription({
-        metadata: { billing_sdk_customer_ref: "user_abc" },
-      });
-      const event = createMockEvent("subscription.created", sub);
-      const { body, headers } = createSignedWebhookPayload(event, TEST_WEBHOOK_SECRET);
-
-      // Note: This test may fail due to signature verification
-      // In real tests, we'd mock the validateEvent function
-      // For now, we test the event handling logic separately
-    });
-  });
-
-  describe("subscription.canceled webhook", () => {
-    it("maps to subscription.canceled with active=true (scheduled cancellation)", () => {
-      // Test the entitlement logic directly
-      const sub = {
-        id: "sub_test",
-        status: "active" as const,
-        cancel_at_period_end: true,
-        current_period_start: new Date().toISOString(),
-        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        product_id: "prod_test",
-        customer_id: "cus_test",
-        metadata: { billing_sdk_customer_ref: "user_cancel" },
-      };
-
-      // When cancel_at_period_end is true but status is still active,
-      // our status should be "canceled" but active should be true
-      // This matches our interface spec
-    });
-  });
-
-  describe("subscription.revoked webhook", () => {
-    it("represents immediate access termination (maps to subscription.ended)", () => {
-      // subscription.revoked in Polar = subscription.ended in our model
-      // This is different from subscription.canceled which is scheduled
-    });
-  });
-
-  describe("status mapping", () => {
-    const statusMappings: Array<{
-      polarStatus: string;
-      expectedStatus: string;
-      expectedActive: boolean;
-      cancelAtPeriodEnd?: boolean;
-    }> = [
-      { polarStatus: "active", expectedStatus: "active", expectedActive: true },
-      { polarStatus: "trialing", expectedStatus: "trialing", expectedActive: true },
-      { polarStatus: "past_due", expectedStatus: "past_due", expectedActive: false },
-      { polarStatus: "canceled", expectedStatus: "expired", expectedActive: false },
-      { polarStatus: "incomplete", expectedStatus: "expired", expectedActive: false },
-      { polarStatus: "incomplete_expired", expectedStatus: "expired", expectedActive: false },
-      { polarStatus: "unpaid", expectedStatus: "expired", expectedActive: false },
-      // Special case: active with cancel_at_period_end
-      {
-        polarStatus: "active",
-        expectedStatus: "canceled",
-        expectedActive: true,
-        cancelAtPeriodEnd: true,
-      },
-    ];
-
-    for (const { polarStatus, expectedStatus, expectedActive, cancelAtPeriodEnd } of statusMappings) {
-      const desc = cancelAtPeriodEnd
-        ? `maps Polar status "${polarStatus}" with cancel_at_period_end to "${expectedStatus}" with active=${expectedActive}`
-        : `maps Polar status "${polarStatus}" to "${expectedStatus}" with active=${expectedActive}`;
-
-      it(desc, () => {
-        // This tests our understanding of the status mapping
-        // The actual implementation is tested via webhook handling
-      });
-    }
-  });
-
-  describe("unmapped events", () => {
-    it("returns unmapped for subscription.active (status change only)", () => {
-      // subscription.active in Polar is just a status change notification
-      // We don't have a specific event for this, so it becomes unmapped
-    });
-
-    it("returns unmapped for subscription.updated (catch-all)", () => {
-      // subscription.updated is a catch-all in Polar
-      // Similar to how we handle non-specific updates in Stripe
-    });
-
-    it("returns unmapped for subscription.paused (not modeled in v1)", () => {
-      // Pausing subscriptions is out of scope for v1
-    });
-
-    it("returns unmapped for subscription.resumed (not modeled in v1)", () => {
-      // Resuming subscriptions is out of scope for v1
-    });
-  });
-
-  describe("customerRef extraction", () => {
-    it("extracts customerRef from subscription metadata", () => {
-      const sub = createMockSubscription({
-        metadata: { billing_sdk_customer_ref: "my_polar_user_123" },
-      });
-
-      // The metadata key is the same across all adapters
-      expect((sub as Record<string, unknown>).metadata).toHaveProperty(
-        "billing_sdk_customer_ref",
-        "my_polar_user_123"
+describe("Polar signed webhook normalization", () => {
+  it.each([
+    ["active", false, "active", true],
+    ["trialing", false, "trialing", true],
+    ["past_due", false, "past_due", false],
+    ["canceled", false, "expired", false],
+    ["unpaid", false, "expired", false],
+    ["incomplete", false, "expired", false],
+    ["incomplete_expired", false, "expired", false],
+    ["future_status", false, "expired", false],
+    ["active", true, "canceled", true],
+  ])(
+    "maps status %s with cancellation %s",
+    async (status, cancel, expectedStatus, active) => {
+      const event = await makeProvider().handleWebhook(
+        signed(
+          "subscription.created",
+          rawSub({ status, cancel_at_period_end: cancel }),
+        ),
       );
+      expect(event).toMatchObject({
+        type: "subscription.started",
+        customerRef: "user_1",
+        entitlement: {
+          status: expectedStatus,
+          active,
+          productId: "prod_pro",
+          periodEnd: expect.any(Date),
+        },
+      });
+    },
+  );
+  it.each([
+    ["subscription.cycled", "subscription.renewed"],
+    ["subscription.canceled", "subscription.canceled"],
+    ["subscription.revoked", "subscription.ended"],
+  ])("maps %s", async (type, normalized) => {
+    const event = await makeProvider().handleWebhook(
+      signed(type, rawSub({ cancel_at_period_end: true })),
+    );
+    expect(event.type).toBe(normalized);
+    if ("entitlement" in event)
+      expect(event.entitlement.active).toBe(type !== "subscription.revoked");
+  });
+  it("does not grant access past a canceled period", async () => {
+    const event = await makeProvider().handleWebhook(
+      signed(
+        "subscription.canceled",
+        rawSub({
+          cancel_at_period_end: true,
+          current_period_end: new Date(Date.now() - 1).toISOString(),
+        }),
+      ),
+    );
+    expect(event).toMatchObject({
+      entitlement: { active: false, status: "expired" },
     });
   });
-});
-
-describe("Polar merchantOfRecord capability", () => {
-  it("Polar is MoR, Stripe is not", async () => {
-    // This test documents the key capability difference
-    const polarProvider = polar({
-      accessToken: TEST_ACCESS_TOKEN,
-      webhookSecret: TEST_WEBHOOK_SECRET,
-    });
-
-    expect(polarProvider.capabilities.merchantOfRecord).toBe(true);
-
-    // If we had a Stripe provider here, we'd compare:
-    // expect(stripeProvider.capabilities.merchantOfRecord).toBe(false);
+  it("preserves event identity and occurrence time across retries", async () => {
+    const req = signed(
+      "subscription.created",
+      rawSub(),
+      "2026-01-01T00:00:00.000Z",
+    );
+    const provider = makeProvider();
+    const a = await provider.handleWebhook(req);
+    const b = await provider.handleWebhook(req);
+    expect(a.id).toBe("msg_stable");
+    expect(b.id).toBe(a.id);
+    expect(a.occurredAt.toISOString()).toBe("2026-01-01T00:00:00.000Z");
   });
-
-  it("callers can branch on merchantOfRecord capability", () => {
-    const provider = polar({
-      accessToken: TEST_ACCESS_TOKEN,
-      webhookSecret: TEST_WEBHOOK_SECRET,
+  it.each(["subscription.updated", "subscription.past_due", "future.event"])(
+    "preserves attribution for %s",
+    async (type) => {
+      expect(
+        await makeProvider().handleWebhook(signed(type, rawSub())),
+      ).toMatchObject({
+        type: "unmapped",
+        providerType: type,
+        customerRef: "user_1",
+        raw: { product_id: "prod_pro" },
+      });
+    },
+  );
+  it("extracts external customer identity for state events", async () => {
+    expect(
+      await makeProvider().handleWebhook(
+        signed("customer.state_changed", { external_id: "user_1" }),
+      ),
+    ).toMatchObject({ customerRef: "user_1" });
+  });
+  it("uses order total and actual refunded amount including tax", async () => {
+    const data = {
+      total_amount: 1200,
+      refunded_amount: 200,
+      refunded_tax_amount: 20,
+      currency: "eur",
+      customer: { external_id: "user_1" },
+    };
+    expect(
+      await makeProvider().handleWebhook(signed("order.paid", data)),
+    ).toMatchObject({
+      type: "payment.succeeded",
+      amount: 1200,
+      currency: "eur",
+      customerRef: "user_1",
     });
-
-    // Example of how callers would use this
-    if (provider.capabilities.merchantOfRecord) {
-      // Polar handles tax - no tax config needed
-      // You are not the merchant of record
-    } else {
-      // You are the merchant - need to handle tax yourself
+    expect(
+      await makeProvider().handleWebhook(signed("order.refunded", data)),
+    ).toMatchObject({ type: "refund.issued", amount: 220 });
+  });
+  it("accepts case-insensitive headers", async () => {
+    const req = signed("future.event");
+    req.headers = Object.fromEntries(
+      Object.entries(req.headers).map(([k, v]) => [k.toUpperCase(), v]),
+    ) as typeof req.headers;
+    expect((await makeProvider().handleWebhook(req)).type).toBe("unmapped");
+  });
+  it("rejects tampering, wrong secrets and missing signatures", async () => {
+    const provider = makeProvider();
+    const req = signed("future.event");
+    for (const bad of [
+      { ...req, body: req.body + " " },
+      { ...req, secret: "wrong" },
+      { ...req, headers: {} },
+    ]) {
+      await expect(provider.handleWebhook(bad)).rejects.toBeInstanceOf(
+        WebhookVerificationError,
+      );
     }
   });
+  it("rejects replay outside timestamp tolerance", async () => {
+    const req = signed("future.event");
+    req.headers["webhook-timestamp"] = "1";
+    req.headers["webhook-signature"] =
+      `v1,${createHmac("sha256", secret).update(`msg_stable.1.${req.body}`).digest("base64")}`;
+    await expect(makeProvider().handleWebhook(req)).rejects.toBeInstanceOf(
+      WebhookVerificationError,
+    );
+  });
+  it("distinguishes signed malformed data from invalid signatures", async () => {
+    await expect(
+      makeProvider().handleWebhook(signed("subscription.created", {})),
+    ).rejects.toBeInstanceOf(TypeError);
+    await expect(
+      makeProvider().handleWebhook(signed("order.paid", {})),
+    ).rejects.toBeInstanceOf(TypeError);
+  });
 });
 
-describe("canceled vs ended distinction (Polar)", () => {
-  it("subscription.canceled = scheduled, user STILL has access", () => {
-    // In Polar, subscription.canceled means the user initiated cancellation
-    // but access continues until current_period_end
+describe("Polar API operations", () => {
+  it("filters server-side, follows pages, and prefers an active subscription", async () => {
+    const provider = makeProvider();
+    const list = mockPages(provider, [
+      [
+        sdkSub({ status: "canceled" }),
+        sdkSub({ metadata: { billing_sdk_customer_ref: "another_user" } }),
+      ],
+      [sdkSub({ id: "sub_active", productId: "prod_paid" })],
+    ]);
+    const entitlement = await provider.getEntitlement("user_1");
+    expect(list).toHaveBeenCalledWith({
+      metadata: { billing_sdk_customer_ref: "user_1" },
+      limit: 100,
+    });
+    expect(entitlement).toMatchObject({
+      active: true,
+      productId: "prod_paid",
+      periodEnd: expect.any(Date),
+      cancelAtPeriodEnd: false,
+    });
   });
-
-  it("subscription.revoked = immediate termination, user has NO access", () => {
-    // In Polar, subscription.revoked means immediate access termination
-    // This maps to our subscription.ended event
+  it("returns null only when no matching subscription exists", async () => {
+    const provider = makeProvider();
+    mockPages(provider, [[]]);
+    expect(await provider.getEntitlement("missing")).toBeNull();
   });
-
-  it("Polar's revoked event maps to our ended event (not canceled)", () => {
-    // Important: revoked != canceled
-    // revoked = ended (access gone now)
-    // canceled = canceled (access until period end)
+  it("propagates provider outages instead of converting them to free users", async () => {
+    const provider = makeProvider();
+    vi.spyOn(provider.native.subscriptions, "list").mockRejectedValue(
+      new Error("429 rate limited"),
+    );
+    await expect(provider.getEntitlement("user_1")).rejects.toThrow("429");
   });
+  it("protects identity metadata and sets external ID and return URL", async () => {
+    const provider = makeProvider();
+    const create = vi
+      .spyOn(provider.native.checkouts, "create")
+      .mockResolvedValue({
+        id: "checkout",
+        url: "https://polar.sh/checkout",
+      } as never);
+    await provider.createCheckout({
+      priceId: "prod_pro",
+      customerRef: "user_1",
+      successUrl: "https://app.test/ok",
+      cancelUrl: "https://app.test/back",
+      metadata: { billing_sdk_customer_ref: "forged" },
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalCustomerId: "user_1",
+        returnUrl: "https://app.test/back",
+        metadata: { billing_sdk_customer_ref: "user_1" },
+      }),
+    );
+  });
+  it("uses SDK customerId and honors portal return URL", async () => {
+    const provider = makeProvider();
+    mockPages(provider, [[sdkSub()]]);
+    const create = vi
+      .spyOn(provider.native.customerSessions, "create")
+      .mockResolvedValue({
+        customerPortalUrl: "https://polar.sh/portal",
+      } as never);
+    expect(
+      await provider.createPortalSession!("user_1", "https://app.test"),
+    ).toEqual({ url: "https://polar.sh/portal" });
+    expect(create).toHaveBeenCalledWith({
+      customerId: "cus_1",
+      returnUrl: "https://app.test",
+    });
+  });
+  it("supports full remaining refunds", async () => {
+    const provider = makeProvider();
+    vi.spyOn(provider.native.orders, "get").mockResolvedValue({
+      refundableAmount: 700,
+    } as never);
+    const create = vi
+      .spyOn(provider.native.refunds, "create")
+      .mockResolvedValue({} as never);
+    await provider.refund!("order_1");
+    expect(create).toHaveBeenCalledWith({
+      orderId: "order_1",
+      amount: 700,
+      reason: "customer_request",
+    });
+  });
+  it.each([0, -1, 1.5, NaN, Infinity])(
+    "rejects invalid refund %s",
+    async (amount) => {
+      const provider = makeProvider();
+      const create = vi.spyOn(provider.native.refunds, "create");
+      await expect(provider.refund!("order_1", amount)).rejects.toThrow(
+        RangeError,
+      );
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -30,3 +30,6 @@ coverage/
 # Next.js (examples)
 examples/*/.next/
 examples/*/out/
+
+# Incremental TypeScript build state
+*.tsbuildinfo

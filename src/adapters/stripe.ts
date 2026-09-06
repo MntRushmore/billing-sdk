@@ -1,8 +1,8 @@
 import Stripe from "stripe";
+import { STRIPE_CAPABILITIES } from "./capabilities.js";
 import type {
   BillingEvent,
   BillingProvider,
-  Capabilities,
   Checkout,
   CheckoutRequest,
   Entitlement,
@@ -22,6 +22,8 @@ export interface StripeProviderOptions {
   webhookSecret: string;
   /** Optional Stripe API version override */
   apiVersion?: Stripe.LatestApiVersion;
+  /** Resolve from your database to avoid Stripe Search's eventual consistency. */
+  resolveCustomerId?: (customerRef: string) => Promise<string | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +53,9 @@ const CUSTOMER_REF_KEY = "billing_sdk_customer_ref";
  * - `paused`: Stripe Billing feature. We treat as expired (no access).
  * - `canceled`: In Stripe this means the subscription is deleted/ended. → expired
  */
-function mapStripeStatus(stripeStatus: Stripe.Subscription.Status): EntitlementStatus {
+function mapStripeStatus(
+  stripeStatus: Stripe.Subscription.Status,
+): EntitlementStatus {
   switch (stripeStatus) {
     case "trialing":
       return "trialing";
@@ -99,7 +103,7 @@ function isSubscriptionActive(sub: Stripe.Subscription): boolean {
 
 function subscriptionToEntitlement(
   sub: Stripe.Subscription,
-  customerRef: string
+  customerRef: string,
 ): Entitlement {
   // If cancel_at_period_end is set and sub is still active, our status is "canceled"
   let status: EntitlementStatus;
@@ -110,19 +114,55 @@ function subscriptionToEntitlement(
   }
 
   // Access period end - field name varies by API version
-  const periodEndTimestamp = (sub as unknown as Record<string, unknown>).current_period_end as number | undefined;
+  const periodEndTimestamp = getPeriodEnd(sub);
 
   return {
-    active: isSubscriptionActive(sub),
+    active:
+      isSubscriptionActive(sub) &&
+      !(
+        sub.cancel_at_period_end &&
+        periodEndTimestamp !== undefined &&
+        periodEndTimestamp * 1000 <= Date.now()
+      ),
     status,
     productId: extractProductId(sub),
     customerRef,
-    periodEnd: periodEndTimestamp
-      ? new Date(periodEndTimestamp * 1000)
-      : null,
+    periodEnd:
+      periodEndTimestamp !== undefined
+        ? new Date(periodEndTimestamp * 1000)
+        : null,
     cancelAtPeriodEnd: sub.cancel_at_period_end,
     provider: PROVIDER_NAME,
   };
+}
+
+function getPeriodEnd(sub: Partial<Stripe.Subscription>): number | undefined {
+  const legacy = (sub as Record<string, unknown>).current_period_end;
+  const item = sub.items?.data[0] as unknown as
+    | Record<string, unknown>
+    | undefined;
+  const value = legacy ?? item?.current_period_end;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function customerQuery(ref: string): string {
+  const escaped = ref.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `metadata["${CUSTOMER_REF_KEY}"]:"${escaped}"`;
+}
+
+function invoiceCustomerRef(invoice: Stripe.Invoice): string | null {
+  const data = invoice as unknown as {
+    subscription_details?: { metadata?: Stripe.Metadata };
+    parent?: { subscription_details?: { metadata?: Stripe.Metadata } };
+  };
+  return (
+    extractCustomerRef(
+      data.parent?.subscription_details?.metadata ??
+        data.subscription_details?.metadata,
+    ) ?? extractCustomerRef(invoice.metadata)
+  );
 }
 
 function extractProductId(sub: Stripe.Subscription): string {
@@ -137,7 +177,9 @@ function extractProductId(sub: Stripe.Subscription): string {
   return price.product?.id ?? "";
 }
 
-function extractCustomerRef(metadata: Stripe.Metadata | null | undefined): string | null {
+function extractCustomerRef(
+  metadata: Stripe.Metadata | null | undefined,
+): string | null {
   return metadata?.[CUSTOMER_REF_KEY] ?? null;
 }
 
@@ -149,15 +191,6 @@ function extractCustomerRef(metadata: Stripe.Metadata | null | undefined): strin
  * Stripe events we explicitly handle.
  * All others become `unmapped`.
  */
-const HANDLED_EVENTS = new Set([
-  "customer.subscription.created",
-  "customer.subscription.updated",
-  "customer.subscription.deleted",
-  "invoice.paid",
-  "invoice.payment_failed",
-  "charge.refunded",
-]);
-
 /**
  * Stripe events we intentionally DO NOT map (they become unmapped):
  *
@@ -175,10 +208,7 @@ const HANDLED_EVENTS = new Set([
  * - subscription_schedule.*: Advanced scheduling (out of scope)
  */
 
-async function handleStripeWebhook(
-  event: Stripe.Event,
-  stripeClient: Stripe
-): Promise<BillingEvent> {
+async function handleStripeWebhook(event: Stripe.Event): Promise<BillingEvent> {
   const eventBase = {
     id: event.id,
     provider: PROVIDER_NAME,
@@ -200,14 +230,16 @@ async function handleStripeWebhook(
 
     case "customer.subscription.updated": {
       const sub = event.data.object as Stripe.Subscription;
-      const previousAttributes = event.data.previous_attributes as Record<string, unknown> | undefined;
+      const previousAttributes = event.data.previous_attributes as
+        | Record<string, unknown>
+        | undefined;
       const customerRef = extractCustomerRef(sub.metadata);
 
       // Check if this is a cancellation being scheduled
       if (
         sub.cancel_at_period_end &&
         previousAttributes &&
-        !previousAttributes.cancel_at_period_end
+        previousAttributes.cancel_at_period_end === false
       ) {
         // Cancellation was just scheduled
         return {
@@ -219,9 +251,10 @@ async function handleStripeWebhook(
       }
 
       // Check if this is a renewal (period changed)
-      const subAny = sub as unknown as Record<string, unknown>;
-      const prevPeriodEnd = previousAttributes?.current_period_end as number | undefined;
-      const currPeriodEnd = subAny.current_period_end as number | undefined;
+      const prevPeriodEnd = previousAttributes
+        ? getPeriodEnd(previousAttributes as Partial<Stripe.Subscription>)
+        : undefined;
+      const currPeriodEnd = getPeriodEnd(sub);
       if (prevPeriodEnd && currPeriodEnd && currPeriodEnd > prevPeriodEnd) {
         return {
           ...eventBase,
@@ -258,9 +291,7 @@ async function handleStripeWebhook(
     case "invoice.paid": {
       const invoice = event.data.object as Stripe.Invoice;
       // Try to get customerRef from subscription metadata via the invoice
-      const invoiceAny = invoice as unknown as Record<string, unknown>;
-      const subDetails = invoiceAny.subscription_details as Record<string, unknown> | undefined;
-      const customerRef = extractCustomerRef(subDetails?.metadata as Stripe.Metadata | undefined);
+      const customerRef = invoiceCustomerRef(invoice);
 
       return {
         ...eventBase,
@@ -273,9 +304,7 @@ async function handleStripeWebhook(
 
     case "invoice.payment_failed": {
       const invoice = event.data.object as Stripe.Invoice;
-      const invoiceAny = invoice as unknown as Record<string, unknown>;
-      const subDetails = invoiceAny.subscription_details as Record<string, unknown> | undefined;
-      const customerRef = extractCustomerRef(subDetails?.metadata as Stripe.Metadata | undefined);
+      const customerRef = invoiceCustomerRef(invoice);
 
       return {
         ...eventBase,
@@ -305,7 +334,9 @@ async function handleStripeWebhook(
       return {
         ...eventBase,
         type: "unmapped",
-        customerRef: null,
+        customerRef: extractCustomerRef(
+          (event.data.object as { metadata?: Stripe.Metadata }).metadata,
+        ),
         providerType: event.type,
         raw: event.data.object,
       };
@@ -343,21 +374,60 @@ export function stripe(options: StripeProviderOptions): StripeProvider {
     typescript: true,
   });
 
-  const webhookSecret = options.webhookSecret;
+  async function findSubscription(
+    customerRef: string,
+  ): Promise<Stripe.Subscription | null> {
+    const candidates: Stripe.Subscription[] = [];
+    if (options.resolveCustomerId) {
+      const customer = await options.resolveCustomerId(customerRef);
+      if (!customer) return null;
+      let after: string | undefined;
+      while (true) {
+        const page = await stripeClient.subscriptions.list({
+          customer,
+          status: "all",
+          limit: 100,
+          starting_after: after,
+        });
+        candidates.push(...page.data);
+        if (!page.has_more || page.data.length === 0) break;
+        after = page.data[page.data.length - 1]!.id;
+      }
+    } else {
+      let nextPage: string | undefined;
+      do {
+        const page = await stripeClient.subscriptions.search({
+          query: customerQuery(customerRef),
+          limit: 100,
+          page: nextPage,
+        });
+        candidates.push(
+          ...page.data.filter(
+            (sub) => extractCustomerRef(sub.metadata) === customerRef,
+          ),
+        );
+        nextPage = page.has_more ? (page.next_page ?? undefined) : undefined;
+      } while (nextPage);
+    }
+    // The singular entitlement API selects an accessible subscription first,
+    // then the newest creation. It does not union multiple plans or add-ons.
+    candidates.sort(
+      (a, b) =>
+        Number(subscriptionToEntitlement(b, customerRef).active) -
+          Number(subscriptionToEntitlement(a, customerRef).active) ||
+        b.created - a.created ||
+        a.id.localeCompare(b.id),
+    );
+    return candidates[0] ?? null;
+  }
 
   const provider: StripeProvider = {
     name: PROVIDER_NAME,
 
-    capabilities: {
-      webhookVerification: true,
-      customerPortal: true,
-      merchantOfRecord: false, // Stripe is not MoR - you are the merchant
-      usageBilling: true, // Stripe supports it, but we don't abstract it
-      proration: true, // Stripe supports it, but we don't abstract it
-      refunds: true,
-    } satisfies Capabilities,
+    capabilities: { ...STRIPE_CAPABILITIES },
 
     async createCheckout(req: CheckoutRequest): Promise<Checkout> {
+      const customer = await options.resolveCustomerId?.(req.customerRef);
       const session = await stripeClient.checkout.sessions.create({
         mode: "subscription",
         line_items: [
@@ -368,16 +438,17 @@ export function stripe(options: StripeProviderOptions): StripeProvider {
         ],
         success_url: req.successUrl,
         cancel_url: req.cancelUrl,
-        customer_email: req.email,
+        customer: customer ?? undefined,
+        customer_email: customer ? undefined : req.email,
         subscription_data: {
           metadata: {
-            [CUSTOMER_REF_KEY]: req.customerRef,
             ...req.metadata,
+            [CUSTOMER_REF_KEY]: req.customerRef,
           },
         },
         metadata: {
-          [CUSTOMER_REF_KEY]: req.customerRef,
           ...req.metadata,
+          [CUSTOMER_REF_KEY]: req.customerRef,
         },
       });
 
@@ -399,27 +470,24 @@ export function stripe(options: StripeProviderOptions): StripeProvider {
         // CRITICAL: Use raw body string for signature verification
         event = stripeClient.webhooks.constructEvent(
           req.body,
-          req.headers["stripe-signature"] ?? "",
-          req.secret
+          Object.entries(req.headers).find(
+            ([name]) => name.toLowerCase() === "stripe-signature",
+          )?.[1] ?? "",
+          req.secret,
         );
       } catch (err) {
         throw new WebhookVerificationError(
-          err instanceof Error ? err.message : "Webhook signature verification failed"
+          err instanceof Error
+            ? err.message
+            : "Webhook signature verification failed",
         );
       }
 
-      return handleStripeWebhook(event, stripeClient);
+      return handleStripeWebhook(event);
     },
 
     async getEntitlement(customerRef: string): Promise<Entitlement | null> {
-      // Search for subscriptions with our customerRef in metadata
-      const subscriptions = await stripeClient.subscriptions.search({
-        query: `metadata["${CUSTOMER_REF_KEY}"]:"${customerRef}"`,
-        limit: 1,
-        expand: ["data.items.data.price.product"],
-      });
-
-      const sub = subscriptions.data[0];
+      const sub = await findSubscription(customerRef);
       if (!sub) return null;
 
       return subscriptionToEntitlement(sub, customerRef);
@@ -427,21 +495,15 @@ export function stripe(options: StripeProviderOptions): StripeProvider {
 
     async createPortalSession(
       customerRef: string,
-      returnUrl: string
+      returnUrl: string,
     ): Promise<{ url: string }> {
-      // First, find the customer by searching subscriptions
-      const subscriptions = await stripeClient.subscriptions.search({
-        query: `metadata["${CUSTOMER_REF_KEY}"]:"${customerRef}"`,
-        limit: 1,
-      });
-
-      const sub = subscriptions.data[0];
-      if (!sub) {
-        throw new Error(`No subscription found for customerRef: ${customerRef}`);
-      }
-
+      const resolved = await options.resolveCustomerId?.(customerRef);
+      const sub = resolved ? null : await findSubscription(customerRef);
       const customerId =
-        typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+        resolved ??
+        (typeof sub?.customer === "string" ? sub.customer : sub?.customer.id);
+      if (!customerId)
+        throw new Error(`No customer found for customerRef: ${customerRef}`);
 
       const session = await stripeClient.billingPortal.sessions.create({
         customer: customerId,
@@ -452,6 +514,15 @@ export function stripe(options: StripeProviderOptions): StripeProvider {
     },
 
     async refund(paymentId: string, amount?: number): Promise<void> {
+      if (!/^(pi_|ch_).+/.test(paymentId))
+        throw new TypeError("Expected a Stripe PaymentIntent or Charge ID");
+      if (
+        amount !== undefined &&
+        (!Number.isSafeInteger(amount) || amount <= 0)
+      )
+        throw new RangeError(
+          "Refund amount must be a positive integer in minor units",
+        );
       // paymentId should be a Stripe PaymentIntent ID or Charge ID
       await stripeClient.refunds.create({
         payment_intent: paymentId.startsWith("pi_") ? paymentId : undefined,

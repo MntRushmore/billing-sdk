@@ -1,5 +1,9 @@
 export { createBillingClient } from "./client.js";
-export { createEnhancedClient, type EnhancedBillingClient, type EnhancedClientOptions } from "./enhanced-client.js";
+export {
+  createEnhancedClient,
+  type EnhancedBillingClient,
+  type EnhancedClientOptions,
+} from "./enhanced-client.js";
 
 export type {
   BillingClient,
@@ -17,7 +21,19 @@ export type {
 export { WebhookVerificationError } from "./types.js";
 
 // Re-export cache types for convenience
-export type { CacheAdapter, CacheOptions, CacheStats } from "./cache/types.js";
+export type {
+  CacheAdapter,
+  CacheLookup,
+  CacheOptions,
+  CacheStats,
+} from "./cache/types.js";
 
 // Re-export feature types for convenience
-export type { PlanConfig, PlanDefinition, FeatureCheckResult } from "./features/types.js";
+export type {
+  PlanConfig,
+  PlanDefinition,
+  FeatureCheckResult,
+  LimitCheckResult,
+} from "./features/types.js";
+
+export { definePlans, FeatureAccessError } from "./features/index.js";

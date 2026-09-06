@@ -11,9 +11,10 @@
  *   npx @fuime/billing-sdk doctor [--provider stripe|polar]
  */
 
-import { stripe } from "../adapters/stripe.js";
-import { polar } from "../adapters/polar.js";
-import type { BillingProvider } from "../types.js";
+import {
+  STRIPE_CAPABILITIES,
+  POLAR_CAPABILITIES,
+} from "../adapters/capabilities.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -74,13 +75,9 @@ async function checkStripe(): Promise<HealthCheckResult> {
   }
 
   try {
-    const provider = stripe({
-      apiKey: secretKey,
-      webhookSecret,
-    });
-
+    const { default: Stripe } = await import("stripe");
+    const stripeClient = new Stripe(secretKey);
     // Try to list one subscription to verify credentials
-    const stripeClient = provider.native;
     await stripeClient.subscriptions.list({ limit: 1 });
 
     return {
@@ -88,7 +85,7 @@ async function checkStripe(): Promise<HealthCheckResult> {
       status: "ok",
       message: "Credentials valid, API reachable",
       details: {
-        capabilities: provider.capabilities,
+        capabilities: STRIPE_CAPABILITIES,
         mode: secretKey.startsWith("sk_test_") ? "test" : "live",
       },
     };
@@ -127,14 +124,12 @@ async function checkPolar(): Promise<HealthCheckResult> {
     // Check for sandbox indicator in token or env
     const sandbox = process.env.POLAR_SANDBOX === "true";
 
-    const provider = polar({
+    const { Polar } = await import("@polar-sh/sdk");
+    const polarClient = new Polar({
       accessToken,
-      webhookSecret,
-      sandbox,
+      server: sandbox ? "sandbox" : "production",
     });
-
     // Try to list subscriptions to verify credentials
-    const polarClient = provider.native;
     await polarClient.subscriptions.list({ limit: 1 });
 
     return {
@@ -142,7 +137,7 @@ async function checkPolar(): Promise<HealthCheckResult> {
       status: "ok",
       message: "Credentials valid, API reachable",
       details: {
-        capabilities: provider.capabilities,
+        capabilities: POLAR_CAPABILITIES,
         mode: sandbox ? "sandbox" : "production",
       },
     };
@@ -175,7 +170,9 @@ function formatResult(result: HealthCheckResult): void {
         ? "yellow"
         : "red";
 
-  console.log(`\n${statusIcon} ${colorize(result.provider.toUpperCase(), "bold")}`);
+  console.log(
+    `\n${statusIcon} ${colorize(result.provider.toUpperCase(), "bold")}`,
+  );
   console.log(`  ${colorize(result.message, statusColor)}`);
 
   if (result.details) {
@@ -192,21 +189,19 @@ function formatResult(result: HealthCheckResult): void {
         .map(([k]) => k);
 
       if (enabled.length > 0) {
-        console.log(
-          `  ${colorize("Enabled:", "dim")} ${enabled.join(", ")}`
-        );
+        console.log(`  ${colorize("Enabled:", "dim")} ${enabled.join(", ")}`);
       }
       if (disabled.length > 0) {
-        console.log(
-          `  ${colorize("Disabled:", "dim")} ${disabled.join(", ")}`
-        );
+        console.log(`  ${colorize("Disabled:", "dim")} ${disabled.join(", ")}`);
       }
     }
   }
 }
 
 function printCapabilityMatrix(results: HealthCheckResult[]): void {
-  const okResults = results.filter((r) => r.status === "ok" && r.details?.capabilities);
+  const okResults = results.filter(
+    (r) => r.status === "ok" && r.details?.capabilities,
+  );
 
   if (okResults.length === 0) return;
 
@@ -230,7 +225,9 @@ function printCapabilityMatrix(results: HealthCheckResult[]): void {
   // Print each capability
   for (const cap of allCaps) {
     const values = okResults.map((r) => {
-      const caps = r.details?.capabilities as Record<string, boolean> | undefined;
+      const caps = r.details?.capabilities as
+        | Record<string, boolean>
+        | undefined;
       const val = caps?.[cap];
       return val
         ? colorize("✓".padEnd(10), "green")
@@ -308,12 +305,15 @@ ${colorize("Environment Variables:", "cyan")}
   const hasError = results.some((r) => r.status === "error");
   if (hasError) {
     console.log(
-      `\n${colorize("Some checks failed. Set the required environment variables.", "yellow")}`
+      `\n${colorize("Some checks failed. Set the required environment variables.", "yellow")}`,
     );
     process.exit(1);
   }
 
-  console.log(`\n${colorize("All checks passed!", "green")}\n`);
+  const hasWarnings = results.some((result) => result.status === "warning");
+  console.log(
+    `\n${colorize(hasWarnings ? "Checks completed with warnings." : "All checks passed!", hasWarnings ? "yellow" : "green")}\n`,
+  );
 }
 
 main().catch((err) => {

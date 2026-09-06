@@ -37,8 +37,7 @@ describe("memoryCache", () => {
 
     it("stores null (no subscription) values", async () => {
       await cache.set("user_no_sub", null, 60_000);
-      // Note: get returns null for both "not cached" and "cached null"
-      // This is intentional - the consumer treats them the same for caching purposes
+      // Legacy get returns null for both cases; lookup distinguishes them.
       const result = await cache.get("user_no_sub");
       expect(result).toBeNull();
     });
@@ -52,7 +51,11 @@ describe("memoryCache", () => {
 
     it("invalidates all entries", async () => {
       await cache.set("user_1", mockEntitlement, 60_000);
-      await cache.set("user_2", { ...mockEntitlement, customerRef: "user_2" }, 60_000);
+      await cache.set(
+        "user_2",
+        { ...mockEntitlement, customerRef: "user_2" },
+        60_000,
+      );
       await cache.invalidateAll();
 
       expect(await cache.get("user_1")).toBeNull();
@@ -80,8 +83,16 @@ describe("memoryCache", () => {
       const smallCache = memoryCache({ maxSize: 2 });
 
       await smallCache.set("user_1", mockEntitlement, 60_000);
-      await smallCache.set("user_2", { ...mockEntitlement, customerRef: "user_2" }, 60_000);
-      await smallCache.set("user_3", { ...mockEntitlement, customerRef: "user_3" }, 60_000);
+      await smallCache.set(
+        "user_2",
+        { ...mockEntitlement, customerRef: "user_2" },
+        60_000,
+      );
+      await smallCache.set(
+        "user_3",
+        { ...mockEntitlement, customerRef: "user_3" },
+        60_000,
+      );
 
       // user_1 should be evicted (oldest)
       expect(await smallCache.get("user_1")).toBeNull();
@@ -134,5 +145,42 @@ describe("memoryCache", () => {
       expect(stats.invalidations).toBe(0);
       expect(stats.size).toBe(1); // Size is preserved
     });
+  });
+});
+
+describe("memory cache isolation and resource management", () => {
+  it("distinguishes negative hits and protects values from caller mutation", async () => {
+    const cache = memoryCache({ cleanupIntervalMs: 0 });
+    expect(await cache.lookup!("missing")).toEqual({ hit: false });
+    await cache.set("none", null, 1000);
+    expect(await cache.lookup!("none")).toEqual({ hit: true, value: null });
+    const value = { ...mockEntitlement, periodEnd: new Date("2030-01-01") };
+    await cache.set("user", value, 1000);
+    value.active = false;
+    value.periodEnd.setFullYear(2000);
+    const first = await cache.get("user");
+    expect(first!.active).toBe(true);
+    expect(first!.periodEnd!.getUTCFullYear()).toBe(2030);
+    first!.active = false;
+    expect((await cache.get("user"))!.active).toBe(true);
+  });
+  it("evicts the least recently used entry", async () => {
+    const cache = memoryCache({ maxSize: 2, cleanupIntervalMs: 0 });
+    await cache.set("a", mockEntitlement, 1000);
+    await cache.set("b", mockEntitlement, 1000);
+    await cache.get("a");
+    await cache.set("c", mockEntitlement, 1000);
+    expect(await cache.get("b")).toBeNull();
+    expect(await cache.get("a")).not.toBeNull();
+  });
+  it("validates capacity, cleanup interval and TTL", async () => {
+    expect(() => memoryCache({ maxSize: 0 })).toThrow(RangeError);
+    expect(() => memoryCache({ maxSize: Infinity })).toThrow(RangeError);
+    expect(() => memoryCache({ cleanupIntervalMs: -1 })).toThrow(RangeError);
+    const cache = memoryCache({ cleanupIntervalMs: 0 });
+    await expect(cache.set("a", null, NaN)).rejects.toThrow(RangeError);
+    await cache.set("a", mockEntitlement, 1000);
+    await cache.dispose!();
+    expect(cache.getStats!().size).toBe(0);
   });
 });
