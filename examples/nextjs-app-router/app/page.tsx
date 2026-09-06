@@ -20,21 +20,15 @@ function Nav() {
         billing-sdk
       </Link>
       <div className="landing-nav-links">
-        <a href="https://github.com/MntRushmore/billing-sdk#readme">Docs</a>
+        <Link href="/docs">Docs</Link>
         <a href="https://github.com/MntRushmore/billing-sdk">GitHub</a>
-        <a
-          className="landing-nav-cta"
-          href="https://github.com/MntRushmore/billing-sdk#quickstart"
-        >
+        <Link className="landing-nav-cta" href="/docs/getting-started">
           Get started
-        </a>
+        </Link>
       </div>
-      <a
-        className="landing-mobile-menu"
-        href="https://github.com/MntRushmore/billing-sdk#readme"
-      >
+      <Link className="landing-mobile-menu" href="/docs">
         Docs
-      </a>
+      </Link>
     </nav>
   );
 }
@@ -55,12 +49,12 @@ function Hero() {
           </span>
         </p>
         <div className="landing-hero-actions">
-          <a
+          <Link
             className="landing-button landing-button-primary"
-            href="https://github.com/MntRushmore/billing-sdk#quickstart"
+            href="/docs/getting-started"
           >
-            Start building ↗
-          </a>
+            Start building
+          </Link>
           <a
             className="landing-button landing-button-secondary"
             href="https://github.com/MntRushmore/billing-sdk"
@@ -272,12 +266,8 @@ function Footer() {
       <nav className="landing-footer-nav">
         <div className="landing-footer-group">
           <span className="landing-footer-label">Product</span>
-          <a href="https://github.com/MntRushmore/billing-sdk#readme">
-            Docs ↗
-          </a>
-          <a href="https://github.com/MntRushmore/billing-sdk#quickstart">
-            Quickstart ↗
-          </a>
+          <Link href="/docs">Docs</Link>
+          <Link href="/docs/getting-started">Quickstart</Link>
         </div>
         <div className="landing-footer-group">
           <span className="landing-footer-label">Package</span>
